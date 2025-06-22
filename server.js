@@ -42,8 +42,7 @@ async function callOpenAI(message) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-            // 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-            'Authorization': `Bearer sk-temp-deployment-key`,
+            'Authorization': `Bearer ${process.env.API_KEY || 'sk-temp-key'}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -101,8 +100,9 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        // API key check temporarily disabled
-        console.log('API key validation disabled for deployment');
+        if (!process.env.API_KEY) {
+            console.log('API key validation disabled for deployment');
+        }
 
         // Gọi OpenAI API
         const aiResponse = await callOpenAI(message.trim());
@@ -154,8 +154,9 @@ app.listen(PORT, () => {
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
     console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
     
-    // API key warning temporarily disabled
-    console.log('API key validation disabled for deployment');
+    if (!process.env.API_KEY) {
+        console.log('API key validation disabled for deployment');
+    }
 });
 
 module.exports = app;
