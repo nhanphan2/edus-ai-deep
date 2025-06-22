@@ -42,7 +42,7 @@ async function callOpenAI(message) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-            'Authorization': `Bearer ${process.env.API_KEY || 'sk-temp-key'}`,
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -100,8 +100,10 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        if (!process.env.API_KEY) {
-            console.log('API key validation disabled for deployment');
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(500).json({ 
+                error: 'Server chưa được cấu hình API key' 
+            });
         }
 
         // Gọi OpenAI API
@@ -154,8 +156,8 @@ app.listen(PORT, () => {
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
     console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
     
-    if (!process.env.API_KEY) {
-        console.log('API key validation disabled for deployment');
+    if (!process.env.OPENAI_API_KEY) {
+        console.warn('⚠️  CẢNH BÁO: Chưa có OPENAI_API_KEY trong file .env');
     }
 });
 
