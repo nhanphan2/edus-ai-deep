@@ -1,4 +1,3 @@
-
 // server.js
 const express = require('express');
 const cors = require('cors');
@@ -43,9 +42,7 @@ async function callOpenAI(message) {
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
-            // COMMENT TẠM THỜI ĐỂ DEPLOY
-            // 'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
-            'Authorization': `Bearer temp-api-key`,
+            'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
@@ -103,12 +100,11 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        // COMMENT TẠM THỜI ĐỂ DEPLOY
-        // if (!process.env.OPENAI_API_KEY) {
-        //     return res.status(500).json({ 
-        //         error: 'Server chưa được cấu hình API key' 
-        //     });
-        // }
+        if (!process.env.OPENAI_API_KEY) {
+            return res.status(500).json({ 
+                error: 'Server chưa được cấu hình API key' 
+            });
+        }
 
         // Gọi OpenAI API
         const aiResponse = await callOpenAI(message.trim());
@@ -160,10 +156,9 @@ app.listen(PORT, () => {
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
     console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
     
-    // COMMENT TẠM THỜI ĐỂ DEPLOY
-    // if (!process.env.OPENAI_API_KEY) {
-    //     console.warn('⚠️  CẢNH BÁO: Chưa có OPENAI_API_KEY trong file .env');
-    // }
+    if (!process.env.OPENAI_API_KEY) {
+        console.warn('⚠️  CẢNH BÁO: Chưa có OPENAI_API_KEY trong file .env');
+    }
 });
 
 module.exports = app;
