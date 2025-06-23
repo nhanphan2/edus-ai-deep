@@ -46,7 +46,7 @@ async function callOpenAI(message) {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: 'gpt-3.5-turbo', // Hoặc 'gpt-4' nếu bạn muốn chất lượng cao hơn
+            model: 'gpt-4o', // Hoặc 'gpt-4' nếu bạn muốn chất lượng cao hơn
             messages: [
                 {
                     role: 'system',
