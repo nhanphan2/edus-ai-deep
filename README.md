@@ -140,3 +140,26 @@ Customize giao diện theo brand
 Thêm tính năng lưu chat history
 Tích hợp authentication
 Tối ưu SEO và performance
+
+
+//D:
+cd D:\appamazon\chat
+
+npm install express cors express-rate-limit dotenv
+
+dir
+
+node server.js
+
+//# Trong D:\appamazon\chat
+git status
+git log --oneline
+
+git add .
+git commit -m "Add all files"
+git push origin main
+
+//# Tạo repo mới trên GitHub: tx88-chat-api
+git remote remove origin
+git remote add origin https://github.com/nhanphan2/tx88-chat-api.git
+git push -u origin main
