@@ -18,8 +18,8 @@ app.use(express.static('public'));
 
 // Rate limiting
 const limiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 phút
-    max: 50, // Tối đa 50 requests mỗi 15 phút
+    windowMs: 15 * 60 * 1000,
+    max: 50,
     message: {
         error: 'Quá nhiều yêu cầu từ IP này. Vui lòng thử lại sau.'
     },
@@ -35,31 +35,81 @@ app.use((req, res, next) => {
     next();
 });
 
-// In-memory storage cho demo (chỉ tồn tại trong session)
-let questionsStorage = [];
-
-// Hàm lưu câu hỏi vào memory
+// Hàm lưu câu hỏi vào Supabase
 async function saveQuestion(question, userIP) {
     try {
-        const newQuestion = {
-            id: Date.now(),
-            question: question,
-            userIP: userIP,
-            timestamp: new Date().toISOString()
-        };
-        
-        questionsStorage.push(newQuestion);
-        
-        // Giữ chỉ 1000 câu hỏi gần nhất
-        if (questionsStorage.length > 1000) {
-            questionsStorage = questionsStorage.slice(-1000);
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/questions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+                'Prefer': 'return=minimal'
+            },
+            body: JSON.stringify({
+                question: question,
+                user_ip: userIP,
+                created_at: new Date().toISOString()
+            })
+        });
+
+        if (response.ok) {
+            console.log(`✅ Đã lưu câu hỏi vào Supabase`);
+        } else {
+            const error = await response.text();
+            console.error('❌ Lỗi khi lưu vào Supabase:', error);
         }
-        
-        console.log(`✅ Đã lưu câu hỏi: ${question.substring(0, 50)}...`);
-        console.log(`📊 Tổng câu hỏi trong memory: ${questionsStorage.length}`);
         
     } catch (error) {
         console.error('❌ Lỗi khi lưu câu hỏi:', error);
+    }
+}
+
+// Hàm lấy câu hỏi từ Supabase
+async function getQuestions(limit = 50) {
+    try {
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/questions?order=created_at.desc&limit=${limit}`, {
+            headers: {
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+            }
+        });
+
+        if (response.ok) {
+            return await response.json();
+        } else {
+            throw new Error(`Supabase error: ${response.statusText}`);
+        }
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi lấy câu hỏi:', error);
+        return [];
+    }
+}
+
+// Hàm đếm tổng số câu hỏi
+async function countQuestions() {
+    try {
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/questions?select=count`, {
+            headers: {
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+                'Prefer': 'count=exact'
+            }
+        });
+
+        if (response.ok) {
+            const countHeader = response.headers.get('Content-Range');
+            if (countHeader) {
+                const count = countHeader.split('/')[1];
+                return parseInt(count) || 0;
+            }
+        }
+        return 0;
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi đếm câu hỏi:', error);
+        return 0;
     }
 }
 
@@ -106,7 +156,7 @@ app.get('/', (req, res) => {
         message: 'OpenAI Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
         version: '1.0.0',
-        questionsInMemory: questionsStorage.length
+        storage: 'Supabase PostgreSQL'
     });
 });
 
@@ -133,7 +183,7 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        // Lưu câu hỏi của người dùng
+        // Lưu câu hỏi của người dùng vào Supabase
         await saveQuestion(message.trim(), req.ip);
 
         // Gọi OpenAI API
@@ -163,34 +213,50 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// API để xem các câu hỏi đã lưu
+// API để xem các câu hỏi đã lưu từ Supabase
 app.get('/api/questions', async (req, res) => {
     try {
-        console.log(`📖 Trả về ${questionsStorage.length} câu hỏi từ memory`);
+        const questions = await getQuestions(50);
+        const total = await countQuestions();
+        
+        console.log(`📖 Trả về ${questions.length}/${total} câu hỏi từ Supabase`);
         
         res.json({
-            total: questionsStorage.length,
-            questions: questionsStorage.slice(-50), // 50 câu hỏi gần nhất
-            note: "Dữ liệu lưu trong memory, sẽ reset khi server restart",
+            total: total,
+            questions: questions,
+            storage: "Supabase PostgreSQL - Persistent storage",
             serverTime: new Date().toISOString()
         });
+        
     } catch (error) {
-        console.error('❌ Lỗi khi đọc câu hỏi:', error.message);
+        console.error('❌ Lỗi khi đọc câu hỏi từ Supabase:', error.message);
         res.json({ 
             total: 0, 
             questions: [], 
-            error: error.message 
+            error: error.message,
+            storage: "Supabase connection failed"
         });
     }
 });
 
 // Health check endpoint
-app.get('/health', (req, res) => {
-    res.json({ 
-        status: 'OK', 
-        timestamp: new Date().toISOString(),
-        questionsCount: questionsStorage.length
-    });
+app.get('/health', async (req, res) => {
+    try {
+        const count = await countQuestions();
+        res.json({ 
+            status: 'OK', 
+            timestamp: new Date().toISOString(),
+            database: 'Connected to Supabase',
+            questionsCount: count
+        });
+    } catch (error) {
+        res.json({ 
+            status: 'DEGRADED', 
+            timestamp: new Date().toISOString(),
+            database: 'Supabase connection failed',
+            error: error.message
+        });
+    }
 });
 
 // 404 handler
@@ -204,16 +270,21 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`🚀 Server đang chạy tại port ${PORT}`);
-    console.log(`📱 Health check: http://localhost:${PORT}/health`);
-    console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
-    console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
-    
-    if (!process.env.API_KEY) {
-        console.warn('⚠️  CẢNH BÁO: Chưa có API_KEY trong file .env');
-    }
-});
+// Start server (chỉ khi không phải trên Vercel)
+if (process.env.NODE_ENV !== 'production') {
+    app.listen(PORT, () => {
+        console.log(`🚀 Server đang chạy tại port ${PORT}`);
+        console.log(`📱 Health check: http://localhost:${PORT}/health`);
+        console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
+        console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
+        
+        if (!process.env.API_KEY) {
+            console.warn('⚠️  CẢNH BÁO: Chưa có API_KEY trong file .env');
+        }
+        if (!process.env.SUPABASE_URL) {
+            console.warn('⚠️  CẢNH BÁO: Chưa có SUPABASE_URL trong file .env');
+        }
+    });
+}
 
 module.exports = app;
