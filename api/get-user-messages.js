@@ -9,19 +9,29 @@ export default async function handler(req, res) {
         const path = require('path');
         const filePath = path.join('/tmp', 'user-messages.json');
         
-        const fileContent = await fs.readFile(filePath, 'utf8');
-        const messages = JSON.parse(fileContent);
-        
-        res.status(200).json({ 
-            success: true, 
-            messages: messages,
-            count: messages.length 
-        });
+        try {
+            const fileContent = await fs.readFile(filePath, 'utf8');
+            const messages = JSON.parse(fileContent);
+            
+            res.status(200).json({ 
+                success: true, 
+                messages: messages,
+                count: messages.length 
+            });
+        } catch (error) {
+            // File không tồn tại hoặc rỗng
+            res.status(200).json({ 
+                success: true, 
+                messages: [],
+                count: 0,
+                note: 'No messages found or file does not exist'
+            });
+        }
     } catch (error) {
-        res.status(200).json({ 
-            success: true, 
-            messages: [],
-            count: 0 
+        console.error('Error reading user messages:', error);
+        res.status(500).json({ 
+            error: 'Failed to read user messages',
+            details: error.message 
         });
     }
 }
