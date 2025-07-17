@@ -2,8 +2,6 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const fs = require('fs').promises;
-const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -11,16 +9,14 @@ const PORT = process.env.PORT || 3000;
 
 // Middleware
 app.use(cors({
-    origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://127.0.0.1:5500'], // Thêm domain frontend của bạn
+    origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://127.0.0.1:5500'], 
     credentials: true
 }));
 
 app.use(express.json({ limit: '10mb' }));
-
-// Serve static files
 app.use(express.static('public'));
 
-// Rate limiting - giới hạn số request
+// Rate limiting
 const limiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 phút
     max: 50, // Tối đa 50 requests mỗi 15 phút
@@ -39,37 +35,12 @@ app.use((req, res, next) => {
     next();
 });
 
-// Hàm lưu câu hỏi vào file
+// In-memory storage cho demo (chỉ tồn tại trong session)
+let questionsStorage = [];
+
+// Hàm lưu câu hỏi vào memory
 async function saveQuestion(question, userIP) {
     try {
-        const questionsFile = path.join(__dirname, 'data', 'questions.json');
-        
-        console.log(`📁 Đường dẫn file: ${questionsFile}`);
-        
-        // Đảm bảo thư mục data tồn tại
-        await fs.mkdir(path.dirname(questionsFile), { recursive: true });
-        
-        // Đọc file hiện tại hoặc tạo mới nếu không tồn tại
-        let questions = [];
-        try {
-            const data = await fs.readFile(questionsFile, 'utf8');
-            const parsed = JSON.parse(data);
-            
-            // Đảm bảo parsed là array
-            if (Array.isArray(parsed)) {
-                questions = parsed;
-                console.log(`📖 Đọc được ${questions.length} câu hỏi từ file`);
-            } else {
-                console.log(`⚠️ File không phải array, tạo mới`);
-                questions = [];
-            }
-        } catch (error) {
-            // File không tồn tại hoặc lỗi format, tạo mảng rỗng
-            console.log(`📄 File chưa tồn tại hoặc lỗi format: ${error.message}`);
-            questions = [];
-        }
-        
-        // Thêm câu hỏi mới
         const newQuestion = {
             id: Date.now(),
             question: question,
@@ -77,16 +48,15 @@ async function saveQuestion(question, userIP) {
             timestamp: new Date().toISOString()
         };
         
-        questions.push(newQuestion);
-        console.log(`➕ Thêm câu hỏi mới: ${JSON.stringify(newQuestion)}`);
+        questionsStorage.push(newQuestion);
         
-        // Lưu lại file (chỉ giữ 1000 câu hỏi gần nhất)
-        if (questions.length > 1000) {
-            questions = questions.slice(-1000);
+        // Giữ chỉ 1000 câu hỏi gần nhất
+        if (questionsStorage.length > 1000) {
+            questionsStorage = questionsStorage.slice(-1000);
         }
         
-        await fs.writeFile(questionsFile, JSON.stringify(questions, null, 2));
-        console.log(`✅ Đã lưu ${questions.length} câu hỏi vào file`);
+        console.log(`✅ Đã lưu câu hỏi: ${question.substring(0, 50)}...`);
+        console.log(`📊 Tổng câu hỏi trong memory: ${questionsStorage.length}`);
         
     } catch (error) {
         console.error('❌ Lỗi khi lưu câu hỏi:', error);
@@ -102,7 +72,7 @@ async function callOpenAI(message) {
             'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            model: 'gpt-4o', // Hoặc 'gpt-4' nếu bạn muốn chất lượng cao hơn
+            model: 'gpt-4o',
             messages: [
                 {
                     role: 'system',
@@ -113,7 +83,7 @@ async function callOpenAI(message) {
                     content: message
                 }
             ],
-            max_tokens: 1000, // Giới hạn độ dài phản hồi
+            max_tokens: 1000,
             temperature: 0.7,
             top_p: 1,
             frequency_penalty: 0,
@@ -135,7 +105,8 @@ app.get('/', (req, res) => {
     res.json({ 
         message: 'OpenAI Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
-        version: '1.0.0'
+        version: '1.0.0',
+        questionsInMemory: questionsStorage.length
     });
 });
 
@@ -176,7 +147,6 @@ app.post('/api/chat', async (req, res) => {
     } catch (error) {
         console.error('Error in /api/chat:', error);
         
-        // Trả về lỗi thân thiện với người dùng
         if (error.message.includes('insufficient_quota')) {
             res.status(503).json({ 
                 error: 'Đã hết hạn mức sử dụng API. Vui lòng thử lại sau.' 
@@ -193,31 +163,34 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
-// API để xem các câu hỏi đã lưu (tùy chọn)
+// API để xem các câu hỏi đã lưu
 app.get('/api/questions', async (req, res) => {
     try {
-        const questionsFile = path.join(__dirname, 'data', 'questions.json');
-        const data = await fs.readFile(questionsFile, 'utf8');
-        const parsed = JSON.parse(data);
-        
-        // Đảm bảo parsed là array
-        const questions = Array.isArray(parsed) ? parsed : [];
-        
-        console.log(`📖 Đọc ${questions.length} câu hỏi từ file`);
+        console.log(`📖 Trả về ${questionsStorage.length} câu hỏi từ memory`);
         
         res.json({
-            total: questions.length,
-            questions: questions.slice(-50) // Chỉ hiển thị 50 câu hỏi gần nhất
+            total: questionsStorage.length,
+            questions: questionsStorage.slice(-50), // 50 câu hỏi gần nhất
+            note: "Dữ liệu lưu trong memory, sẽ reset khi server restart",
+            serverTime: new Date().toISOString()
         });
     } catch (error) {
-        console.error('❌ Lỗi khi đọc file câu hỏi:', error.message);
-        res.json({ total: 0, questions: [], error: error.message });
+        console.error('❌ Lỗi khi đọc câu hỏi:', error.message);
+        res.json({ 
+            total: 0, 
+            questions: [], 
+            error: error.message 
+        });
     }
 });
 
 // Health check endpoint
 app.get('/health', (req, res) => {
-    res.json({ status: 'OK', timestamp: new Date().toISOString() });
+    res.json({ 
+        status: 'OK', 
+        timestamp: new Date().toISOString(),
+        questionsCount: questionsStorage.length
+    });
 });
 
 // 404 handler
@@ -239,7 +212,7 @@ app.listen(PORT, () => {
     console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
     
     if (!process.env.API_KEY) {
-        console.warn('⚠️  CẢNH BÁO: Chưa có OPENAI_API_KEY trong file .env');
+        console.warn('⚠️  CẢNH BÁO: Chưa có API_KEY trong file .env');
     }
 });
 
