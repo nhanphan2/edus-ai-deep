@@ -2,6 +2,8 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const fs = require('fs').promises;
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -36,6 +38,60 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - IP: ${req.ip}`);
     next();
 });
+
+// Hàm lưu câu hỏi vào file
+async function saveQuestion(question, userIP) {
+    try {
+        const questionsFile = path.join(__dirname, 'data', 'questions.json');
+        
+        console.log(`📁 Đường dẫn file: ${questionsFile}`);
+        
+        // Đảm bảo thư mục data tồn tại
+        await fs.mkdir(path.dirname(questionsFile), { recursive: true });
+        
+        // Đọc file hiện tại hoặc tạo mới nếu không tồn tại
+        let questions = [];
+        try {
+            const data = await fs.readFile(questionsFile, 'utf8');
+            const parsed = JSON.parse(data);
+            
+            // Đảm bảo parsed là array
+            if (Array.isArray(parsed)) {
+                questions = parsed;
+                console.log(`📖 Đọc được ${questions.length} câu hỏi từ file`);
+            } else {
+                console.log(`⚠️ File không phải array, tạo mới`);
+                questions = [];
+            }
+        } catch (error) {
+            // File không tồn tại hoặc lỗi format, tạo mảng rỗng
+            console.log(`📄 File chưa tồn tại hoặc lỗi format: ${error.message}`);
+            questions = [];
+        }
+        
+        // Thêm câu hỏi mới
+        const newQuestion = {
+            id: Date.now(),
+            question: question,
+            userIP: userIP,
+            timestamp: new Date().toISOString()
+        };
+        
+        questions.push(newQuestion);
+        console.log(`➕ Thêm câu hỏi mới: ${JSON.stringify(newQuestion)}`);
+        
+        // Lưu lại file (chỉ giữ 1000 câu hỏi gần nhất)
+        if (questions.length > 1000) {
+            questions = questions.slice(-1000);
+        }
+        
+        await fs.writeFile(questionsFile, JSON.stringify(questions, null, 2));
+        console.log(`✅ Đã lưu ${questions.length} câu hỏi vào file`);
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi lưu câu hỏi:', error);
+    }
+}
 
 // OpenAI API call function
 async function callOpenAI(message) {
@@ -106,6 +162,9 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
+        // Lưu câu hỏi của người dùng
+        await saveQuestion(message.trim(), req.ip);
+
         // Gọi OpenAI API
         const aiResponse = await callOpenAI(message.trim());
 
@@ -134,6 +193,28 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
+// API để xem các câu hỏi đã lưu (tùy chọn)
+app.get('/api/questions', async (req, res) => {
+    try {
+        const questionsFile = path.join(__dirname, 'data', 'questions.json');
+        const data = await fs.readFile(questionsFile, 'utf8');
+        const parsed = JSON.parse(data);
+        
+        // Đảm bảo parsed là array
+        const questions = Array.isArray(parsed) ? parsed : [];
+        
+        console.log(`📖 Đọc ${questions.length} câu hỏi từ file`);
+        
+        res.json({
+            total: questions.length,
+            questions: questions.slice(-50) // Chỉ hiển thị 50 câu hỏi gần nhất
+        });
+    } catch (error) {
+        console.error('❌ Lỗi khi đọc file câu hỏi:', error.message);
+        res.json({ total: 0, questions: [], error: error.message });
+    }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
     res.json({ status: 'OK', timestamp: new Date().toISOString() });
@@ -155,6 +236,7 @@ app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại port ${PORT}`);
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
     console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
+    console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
     
     if (!process.env.API_KEY) {
         console.warn('⚠️  CẢNH BÁO: Chưa có OPENAI_API_KEY trong file .env');
