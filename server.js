@@ -105,86 +105,7 @@ app.post('/api/chat', async (req, res) => {
                 error: 'Server chưa được cấu hình API key' 
             });
         }
-         try {
-            await saveUserMessage({
-                message: message.trim(),
-                timestamp: new Date().toISOString(),
-                hasImages: false,
-                userAgent: req.headers['user-agent'] || 'unknown',
-                sessionId: req.headers['x-session-id'] || 'anonymous',
-                ip: req.ip || req.connection.remoteAddress
-            });
-        } catch (saveError) {
-            console.error('Failed to save user message:', saveError);
-            // Không dừng chat nếu lưu thất bại
-        }
-        // ===== HẾT ĐOẠN THÊM =====
-// Thêm API lưu tin nhắn người dùng
-app.post('/api/save-user-message', async (req, res) => {
-    try {
-        const { message, timestamp, hasImages, userAgent, sessionId } = req.body;
 
-        if (!message && !hasImages) {
-            return res.status(400).json({ error: 'No message content' });
-        }
-
-        const userMessageData = {
-            message: message || '',
-            timestamp: timestamp || new Date().toISOString(),
-            hasImages: hasImages || false,
-            userAgent: userAgent || 'unknown',
-            sessionId: sessionId || 'anonymous',
-            ip: req.ip || req.connection.remoteAddress
-        };
-
-        // Lưu vào file
-        await saveUserMessage(userMessageData);
-
-        res.status(200).json({ 
-            success: true, 
-            message: 'User message saved successfully' 
-        });
-
-    } catch (error) {
-        console.error('Error saving user message:', error);
-        res.status(500).json({ 
-            error: 'Failed to save user message',
-            details: error.message 
-        });
-    }
-});
-
-// API xem tin nhắn đã lưu
-app.get('/api/get-user-messages', async (req, res) => {
-    try {
-        const fs = require('fs').promises;
-        const path = require('path');
-        const filePath = path.join('/tmp', 'user-messages.json');
-        
-        try {
-            const fileContent = await fs.readFile(filePath, 'utf8');
-            const messages = JSON.parse(fileContent);
-            
-            res.status(200).json({ 
-                success: true, 
-                messages: messages,
-                count: messages.length 
-            });
-        } catch (error) {
-            res.status(200).json({ 
-                success: true, 
-                messages: [],
-                count: 0,
-                note: 'No messages found'
-            });
-        }
-    } catch (error) {
-        res.status(500).json({ 
-            error: 'Failed to read user messages',
-            details: error.message 
-        });
-    }
-});
         // Gọi OpenAI API
         const aiResponse = await callOpenAI(message.trim());
 
@@ -228,30 +149,7 @@ app.use((error, req, res, next) => {
     console.error('Unhandled error:', error);
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
-// Hàm lưu tin nhắn người dùng
-async function saveUserMessage(data) {
-    const fs = require('fs').promises;
-    const path = require('path');
-    
-    try {
-        const filePath = path.join('/tmp', 'user-messages.json');
-        let messages = [];
-        
-        try {
-            const fileContent = await fs.readFile(filePath, 'utf8');
-            messages = JSON.parse(fileContent);
-        } catch (error) {
-            // File không tồn tại, tạo mới
-            messages = [];
-        }
-        
-        messages.push(data);
-        await fs.writeFile(filePath, JSON.stringify(messages, null, 2));
-    } catch (error) {
-        console.error('Error writing to file:', error);
-        throw error;
-    }
-}
+
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại port ${PORT}`);
