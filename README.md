@@ -143,7 +143,7 @@ Tối ưu SEO và performance
 
 
 //D:
-cd D:\appamazon\chat
+cd D:\appamazon\chat (cd /d D:\appamazon\chat)
 
 npm install express cors express-rate-limit dotenv
 
