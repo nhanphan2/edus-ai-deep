@@ -1,8 +1,7 @@
-// server.js
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
-const crypto = require('crypto'); // Thêm để hash IP
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -36,7 +35,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// ===== CHAT HISTORY FUNCTIONS WITH SUPABASE =====
+// ===== UTILITY FUNCTIONS =====
 
 // Lấy IP thật của user
 function getRealIP(req) {
@@ -53,12 +52,14 @@ function hashIP(ip) {
     return crypto.createHash('sha256').update(ip + salt).digest('hex');
 }
 
+// ===== CHAT HISTORY FUNCTIONS WITH SUPABASE =====
+
 // Lưu message vào Supabase
 async function saveMessageToSupabase(ipHash, content, sender, images = []) {
     try {
         console.log(`💾 Saving ${sender} message to Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
         
-        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(); // 24h from now
+        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
         
         const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/chat_sessions`, {
             method: 'POST',
@@ -98,7 +99,6 @@ async function getMessagesFromSupabase(ipHash) {
     try {
         console.log(`📖 Loading messages from Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
         
-        // Get messages that haven't expired, ordered by creation time
         const response = await fetch(
             `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?ip_hash=eq.${ipHash}&expires_at=gte.${new Date().toISOString()}&order=created_at.asc`,
             {
@@ -113,7 +113,6 @@ async function getMessagesFromSupabase(ipHash) {
             const data = await response.json();
             console.log(`✅ Loaded ${data.length} messages from Supabase`);
             
-            // Transform to frontend format
             const messages = data.map(row => ({
                 content: row.content,
                 sender: row.sender,
@@ -121,7 +120,6 @@ async function getMessagesFromSupabase(ipHash) {
                 timestamp: new Date(row.created_at).getTime()
             }));
             
-            // Calculate session info
             const sessionInfo = data.length > 0 ? {
                 messageCount: data.length,
                 createdAt: new Date(data[0].created_at).getTime(),
@@ -201,76 +199,163 @@ async function clearMessagesForIP(ipHash) {
     }
 }
 
-// ===== EXISTING FUNCTIONS =====
-// ===== EXERCISE HISTORY FUNCTIONS =====
+// ===== EXERCISE HISTORY FUNCTIONS WITH SUPABASE =====
 
-// Exercise sessions storage (separate from chat)
-let exerciseSessions = new Map();
-
-// Exercise-specific cleanup function
-function cleanupExpiredExerciseSessions() {
-    const now = Date.now();
-    let cleanedCount = 0;
-    
-    for (let [key, session] of exerciseSessions.entries()) {
-        if (session.expiresAt < now) {
-            exerciseSessions.delete(key);
-            cleanedCount++;
-        }
-    }
-    
-    if (cleanedCount > 0) {
-        console.log(`🧹 Đã xóa ${cleanedCount} exercise sessions hết hạn`);
-    }
-}
-
-// Save exercise to session
-function saveExerciseToSession(ipHash, prompt, result, formData) {
+async function saveExerciseToSupabase(ipHash, content, sender, formData = {}) {
     try {
-        cleanupExpiredExerciseSessions();
+        console.log(`💾 Saving ${sender} exercise to Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
         
-        let session = exerciseSessions.get(ipHash);
-        const now = Date.now();
+        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
         
-        if (!session || session.expiresAt < now) {
-            session = {
-                exercises: [],
-                createdAt: now,
-                expiresAt: now + (24 * 60 * 60 * 1000), // 24h
-                lastActivity: now
-            };
-        }
-        
-        // Add new exercise (keep only last 5 exercises per IP)
-        session.exercises.push({
-            prompt: prompt,
-            result: result,
-            formData: formData,
-            timestamp: now
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/exercise_sessions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+                ip_hash: ipHash,
+                content: content,
+                sender: sender,
+                subject: formData.subject || null,
+                grade: formData.grade || null,
+                difficulty: formData.difficulty || null,
+                topic: formData.topic || null,
+                quantity: formData.quantity || null,
+                form_data: formData,
+                expires_at: expiresAt
+            })
         });
-        
-        // Keep only last 5 exercises
-        if (session.exercises.length > 5) {
-            session.exercises = session.exercises.slice(-5);
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log(`✅ Saved ${sender} exercise to Supabase:`, result[0]?.id);
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error saving exercise to Supabase:', response.status, error);
+            return false;
         }
         
-        session.lastActivity = now;
-        exerciseSessions.set(ipHash, session);
-        
-        console.log(`💾 Đã lưu exercise cho IP hash: ${ipHash.substring(0, 8)}... (${session.exercises.length} exercises total)`);
-        
-        return true;
     } catch (error) {
-        console.error('❌ Lỗi khi lưu exercise:', error);
+        console.error('❌ Exception saving exercise to Supabase:', error);
         return false;
     }
 }
-// Hàm lưu câu hỏi vào Supabase
+
+async function getExercisesFromSupabase(ipHash) {
+    try {
+        console.log(`📖 Loading exercises from Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/exercise_sessions?ip_hash=eq.${ipHash}&expires_at=gte.${new Date().toISOString()}&order=created_at.asc&limit=10`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`✅ Loaded ${data.length} exercises from Supabase`);
+            
+            const exercises = [];
+            for (let i = 0; i < data.length; i += 2) {
+                const userMsg = data[i];
+                const aiMsg = data[i + 1];
+                
+                if (userMsg && aiMsg && userMsg.sender === 'user' && aiMsg.sender === 'ai') {
+                    exercises.push({
+                        prompt: userMsg.content,
+                        result: aiMsg.content,
+                        formData: userMsg.form_data || {},
+                        timestamp: new Date(userMsg.created_at).getTime()
+                    });
+                }
+            }
+            
+            const recentExercises = exercises.slice(-5);
+            
+            return { exercises: recentExercises };
+        } else {
+            const error = await response.text();
+            console.error('❌ Error loading exercises from Supabase:', response.status, error);
+            return { exercises: [] };
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception loading exercises from Supabase:', error);
+        return { exercises: [] };
+    }
+}
+
+async function cleanupExpiredExercises() {
+    try {
+        console.log('🧹 Cleaning up expired exercises...');
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/exercise_sessions?expires_at=lt.${new Date().toISOString()}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleaned up expired exercises');
+        } else {
+            const error = await response.text();
+            console.error('❌ Error cleaning up expired exercises:', response.status, error);
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception cleaning up expired exercises:', error);
+    }
+}
+
+async function clearExercisesForIP(ipHash) {
+    try {
+        console.log(`🗑️ Clearing all exercises for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/exercise_sessions?ip_hash=eq.${ipHash}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleared all exercises for IP');
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error clearing exercises:', response.status, error);
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception clearing exercises:', error);
+        return false;
+    }
+}
+
+// ===== QUESTION FUNCTIONS =====
+
 async function saveQuestion(question, userIP) {
     try {
         console.log('🔄 Đang lưu câu hỏi vào Supabase...');
         console.log('📝 Câu hỏi:', question);
-        console.log('🌐 URL:', process.env.SUPABASE_URL);
         
         const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/questions`, {
             method: 'POST',
@@ -301,7 +386,6 @@ async function saveQuestion(question, userIP) {
     }
 }
 
-// Hàm lấy câu hỏi từ Supabase
 async function getQuestions(limit = 50) {
     try {
         console.log('🔍 Đang lấy câu hỏi từ Supabase...');
@@ -331,7 +415,6 @@ async function getQuestions(limit = 50) {
     }
 }
 
-// Hàm đếm tổng số câu hỏi
 async function countQuestions() {
     try {
         const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/questions?select=count`, {
@@ -420,7 +503,8 @@ app.get('/', (req, res) => {
         ai_provider: 'DeepSeek AI',
         storage: 'Supabase PostgreSQL',
         chat_history: 'Supabase (24h persistent)',
-        features: ['Chat History', 'IP-based Sessions', 'Persistent Storage'],
+        exercise_history: 'Supabase (24h persistent)',
+        features: ['Chat History', 'Exercise History', 'IP-based Sessions', 'Persistent Storage'],
         env_check: {
             supabase_url: !!process.env.SUPABASE_URL,
             supabase_key: !!process.env.SUPABASE_ANON_KEY,
@@ -430,9 +514,8 @@ app.get('/', (req, res) => {
     });
 });
 
-// ===== CHAT HISTORY ENDPOINTS WITH SUPABASE =====
+// ===== CHAT ENDPOINTS =====
 
-// Lấy lịch sử chat theo IP
 app.get('/api/chat/history', async (req, res) => {
     try {
         const ip = getRealIP(req);
@@ -455,12 +538,10 @@ app.get('/api/chat/history', async (req, res) => {
     }
 });
 
-// Lưu tin nhắn vào lịch sử
 app.post('/api/chat/save', async (req, res) => {
     try {
         const { message, sender, images = [] } = req.body;
         
-        // Validation
         if (!message || !sender) {
             return res.status(400).json({ 
                 success: false, 
@@ -498,7 +579,6 @@ app.post('/api/chat/save', async (req, res) => {
     }
 });
 
-// Xóa lịch sử chat
 app.delete('/api/chat/clear', async (req, res) => {
     try {
         const ip = getRealIP(req);
@@ -524,8 +604,6 @@ app.delete('/api/chat/clear', async (req, res) => {
     }
 });
 
-// ===== EXISTING CHAT ENDPOINT (MODIFIED) =====
-
 app.post('/api/chat', async (req, res) => {
     try {
         const { message, images } = req.body;
@@ -535,7 +613,6 @@ app.post('/api/chat', async (req, res) => {
             console.log('🖼️ Có hình ảnh đính kèm:', images.length);
         }
 
-        // Validation
         if (!message || typeof message !== 'string') {
             return res.status(400).json({ 
                 error: 'Tin nhắn không hợp lệ' 
@@ -554,20 +631,14 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        // Lưu câu hỏi của người dùng vào Supabase (existing function)
         await saveQuestion(message.trim(), req.ip);
 
-        // Xử lý hình ảnh (nếu có) - DeepSeek có thể hỗ trợ vision trong tương lai
         let fullMessage = message.trim();
         if (images && images.length > 0) {
             fullMessage += `\n\n[Người dùng đã gửi ${images.length} hình ảnh đính kèm]`;
         }
 
-        // Gọi DeepSeek API
         const aiResponse = await callDeepSeek(fullMessage);
-
-        // NOTE: Chat history được lưu thông qua frontend call tới /api/chat/save
-        // Không auto-save ở đây để tránh duplicate khi load lại trang
 
         res.json({ 
             response: aiResponse,
@@ -599,16 +670,15 @@ app.post('/api/chat', async (req, res) => {
         }
     }
 });
+
 // ===== EXERCISE ENDPOINTS =====
 
-// POST /api/exercise - Tạo bài tập
 app.post('/api/exercise', async (req, res) => {
     try {
         const { message, formData } = req.body;
 
         console.log('📚 Nhận được yêu cầu tạo bài tập:', message?.substring(0, 100) + '...');
 
-        // Validation
         if (!message || typeof message !== 'string') {
             return res.status(400).json({ 
                 error: 'Prompt bài tập không hợp lệ' 
@@ -627,18 +697,14 @@ app.post('/api/exercise', async (req, res) => {
             });
         }
 
-        // Lấy IP và hash
         const ip = getRealIP(req);
         const ipHash = hashIP(ip);
 
-        // Gọi DeepSeek API (dùng chung với chat)
+        await saveExerciseToSupabase(ipHash, message, 'user', formData);
         const aiResponse = await callDeepSeek(message);
+        await saveExerciseToSupabase(ipHash, aiResponse, 'ai', formData);
 
-        // Lưu exercise vào session riêng
-        saveExerciseToSession(ipHash, message, aiResponse, formData);
-
-        // Lưu vào Supabase (nếu muốn keep track)
-        await saveQuestion(`[EXERCISE] ${formData?.subject || 'Unknown'} - ${formData?.topic || 'Unknown'}`, ip);
+        await saveQuestion(message.trim(), ip);
 
         res.json({ 
             response: aiResponse,
@@ -671,28 +737,18 @@ app.post('/api/exercise', async (req, res) => {
     }
 });
 
-// GET /api/exercise/history - Lấy lịch sử bài tập
-app.get('/api/exercise/history', (req, res) => {
+app.get('/api/exercise/history', async (req, res) => {
     try {
-        cleanupExpiredExerciseSessions();
-        
         const ip = getRealIP(req);
         const ipHash = hashIP(ip);
-        const session = exerciseSessions.get(ipHash);
         
-        if (session && session.expiresAt > Date.now()) {
-            console.log(`📖 Trả về ${session.exercises.length} bài tập cho IP hash: ${ipHash.substring(0, 8)}...`);
-            res.json({ 
-                success: true, 
-                exercises: session.exercises
-            });
-        } else {
-            console.log(`📭 Không có lịch sử bài tập cho IP hash: ${ipHash.substring(0, 8)}...`);
-            res.json({ 
-                success: true, 
-                exercises: []
-            });
-        }
+        const { exercises } = await getExercisesFromSupabase(ipHash);
+        
+        res.json({ 
+            success: true, 
+            exercises: exercises
+        });
+        
     } catch (error) {
         console.error('❌ Lỗi khi lấy lịch sử bài tập:', error);
         res.status(500).json({ 
@@ -702,9 +758,104 @@ app.get('/api/exercise/history', (req, res) => {
     }
 });
 
-// ===== EXISTING ENDPOINTS =====
+app.delete('/api/exercise/clear', async (req, res) => {
+    try {
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        
+        const success = await clearExercisesForIP(ipHash);
+        
+        if (success) {
+            res.json({ success: true, message: 'Đã xóa lịch sử bài tập' });
+        } else {
+            res.status(500).json({ 
+                success: false, 
+                error: 'Không thể xóa lịch sử bài tập' 
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi xóa lịch sử bài tập:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
 
-// API để xem các câu hỏi đã lưu từ Supabase
+app.get('/api/exercise/stats', async (req, res) => {
+    try {
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/exercise_sessions?expires_at=gte.${new Date().toISOString()}&select=ip_hash,sender,subject,grade,difficulty,created_at,expires_at`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            
+            const sessionMap = new Map();
+            const subjectStats = {};
+            const gradeStats = {};
+            
+            data.forEach(row => {
+                const key = row.ip_hash;
+                if (!sessionMap.has(key)) {
+                    sessionMap.set(key, {
+                        ipHash: key.substring(0, 8) + '...',
+                        exerciseCount: 0,
+                        firstExercise: row.created_at,
+                        expiresAt: row.expires_at
+                    });
+                }
+                sessionMap.get(key).exerciseCount++;
+                
+                if (row.subject) {
+                    subjectStats[row.subject] = (subjectStats[row.subject] || 0) + 1;
+                }
+                
+                if (row.grade) {
+                    gradeStats[row.grade] = (gradeStats[row.grade] || 0) + 1;
+                }
+            });
+            
+            const stats = {
+                totalSessions: sessionMap.size,
+                totalExercises: data.length,
+                subjectDistribution: subjectStats,
+                gradeDistribution: gradeStats,
+                sessionsInfo: Array.from(sessionMap.values()).map(session => ({
+                    ...session,
+                    createdAt: session.firstExercise,
+                    timeRemaining: Math.max(0, new Date(session.expiresAt).getTime() - Date.now())
+                }))
+            };
+            
+            res.json(stats);
+        } else {
+            res.status(500).json({ error: 'Cannot fetch exercise stats from Supabase' });
+        }
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/exercise/cleanup', async (req, res) => {
+    try {
+        await cleanupExpiredExercises();
+        res.json({ success: true, message: 'Exercise cleanup completed' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// ===== OTHER ENDPOINTS =====
+
 app.get('/api/questions', async (req, res) => {
     try {
         const questions = await getQuestions(50);
@@ -731,12 +882,10 @@ app.get('/api/questions', async (req, res) => {
     }
 });
 
-// Health check endpoint
 app.get('/health', async (req, res) => {
     try {
-        const count = await countQuestions();
+        const questionCount = await countQuestions();
         
-        // Test DeepSeek API connection
         let deepseekStatus = 'Unknown';
         try {
             await callDeepSeek('Hello');
@@ -751,8 +900,10 @@ app.get('/health', async (req, res) => {
             database: 'Connected to Supabase',
             ai_provider: 'DeepSeek AI',
             deepseek_status: deepseekStatus,
-            questionsCount: count,
-            chatStorage: 'Supabase (persistent 24h)'
+            questionsCount: questionCount,
+            chatStorage: 'Supabase (persistent 24h)',
+            exerciseStorage: 'Supabase (persistent 24h)',
+            tables: ['chat_sessions', 'exercise_sessions', 'questions']
         });
     } catch (error) {
         res.json({ 
@@ -765,7 +916,6 @@ app.get('/health', async (req, res) => {
     }
 });
 
-// API endpoint để test DeepSeek connection
 app.get('/api/test-deepseek', async (req, res) => {
     try {
         const testResponse = await callDeepSeek('Xin chào! Bạn có thể trả lời bằng tiếng Việt không?');
@@ -784,10 +934,8 @@ app.get('/api/test-deepseek', async (req, res) => {
     }
 });
 
-// API để xem thống kê chat sessions (debug) - từ Supabase
 app.get('/api/chat/stats', async (req, res) => {
     try {
-        // Get stats from Supabase
         const response = await fetch(
             `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?expires_at=gte.${new Date().toISOString()}&select=ip_hash,sender,created_at,expires_at`,
             {
@@ -801,7 +949,6 @@ app.get('/api/chat/stats', async (req, res) => {
         if (response.ok) {
             const data = await response.json();
             
-            // Group by IP hash
             const sessionMap = new Map();
             data.forEach(row => {
                 const key = row.ip_hash;
@@ -836,7 +983,6 @@ app.get('/api/chat/stats', async (req, res) => {
     }
 });
 
-// Cleanup endpoint (manual trigger)
 app.post('/api/chat/cleanup', async (req, res) => {
     try {
         await cleanupExpiredMessages();
@@ -857,22 +1003,27 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
-// Cleanup expired messages and exercises every hour
+// Cleanup interval
 setInterval(() => {
     cleanupExpiredMessages();
-    cleanupExpiredExerciseSessions();
-}, 60 * 60 * 1000); // 1 hour
+    cleanupExpiredExercises();
+}, 60 * 60 * 1000);
 
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại port ${PORT}`);
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
-    console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
-    console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
-    console.log(`🧪 Test DeepSeek: http://localhost:${PORT}/api/test-deepseek`);
+    console.log(`🤖 Chat endpoint: http://localhost:${PORT}/api/chat`);
     console.log(`💬 Chat history: http://localhost:${PORT}/api/chat/history`);
     console.log(`📊 Chat stats: http://localhost:${PORT}/api/chat/stats`);
-    console.log(`🧹 Cleanup: http://localhost:${PORT}/api/chat/cleanup`);
+    console.log(`🧹 Chat cleanup: http://localhost:${PORT}/api/chat/cleanup`);
+    console.log(`📚 Exercise endpoint: http://localhost:${PORT}/api/exercise`);
+    console.log(`📖 Exercise history: http://localhost:${PORT}/api/exercise/history`);
+    console.log(`📈 Exercise stats: http://localhost:${PORT}/api/exercise/stats`);
+    console.log(`🗑️ Exercise clear: http://localhost:${PORT}/api/exercise/clear`);
+    console.log(`🧹 Exercise cleanup: http://localhost:${PORT}/api/exercise/cleanup`);
+    console.log(`📝 Questions: http://localhost:${PORT}/api/questions`);
+    console.log(`🧪 Test DeepSeek: http://localhost:${PORT}/api/test-deepseek`);
     
     console.log('\n🔧 Kiểm tra cấu hình:');
     if (!process.env.DEEPSEEK_API_KEY) {
@@ -902,6 +1053,8 @@ app.listen(PORT, () => {
     console.log('\n🤖 AI Provider: DeepSeek AI');
     console.log('📖 Model: deepseek-chat');
     console.log('💾 Chat Storage: Supabase PostgreSQL (24h persistent)');
+    console.log('📚 Exercise Storage: Supabase PostgreSQL (24h persistent)');
+    console.log('🗄️ Tables: chat_sessions, exercise_sessions, questions');
 });
 
 module.exports = app;
