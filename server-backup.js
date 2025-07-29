@@ -8,9 +8,6 @@ require('dotenv').config();
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Chat sessions storage (in-memory)
-let chatSessions = new Map();
-
 // Middleware
 app.use(cors({
     origin: process.env.FRONTEND_URL || ['http://localhost:3000', 'http://127.0.0.1:5500'], 
@@ -39,7 +36,7 @@ app.use((req, res, next) => {
     next();
 });
 
-// ===== CHAT HISTORY FUNCTIONS =====
+// ===== CHAT HISTORY FUNCTIONS WITH SUPABASE =====
 
 // Lấy IP thật của user
 function getRealIP(req) {
@@ -56,66 +53,150 @@ function hashIP(ip) {
     return crypto.createHash('sha256').update(ip + salt).digest('hex');
 }
 
-// Dọn dẹp sessions hết hạn
-function cleanupExpiredSessions() {
-    const now = Date.now();
-    let cleanedCount = 0;
-    
-    for (let [key, session] of chatSessions.entries()) {
-        if (session.expiresAt < now) {
-            chatSessions.delete(key);
-            cleanedCount++;
-        }
-    }
-    
-    if (cleanedCount > 0) {
-        console.log(`🧹 Đã xóa ${cleanedCount} chat sessions hết hạn`);
-    }
-}
-
-// Lấy hoặc tạo session cho IP
-function getOrCreateSession(ipHash) {
-    cleanupExpiredSessions();
-    
-    let session = chatSessions.get(ipHash);
-    const now = Date.now();
-    
-    if (!session || session.expiresAt < now) {
-        // Tạo session mới
-        session = {
-            messages: [],
-            createdAt: now,
-            expiresAt: now + (24 * 60 * 60 * 1000), // 24h from now
-            lastActivity: now
-        };
-        chatSessions.set(ipHash, session);
-        console.log(`✨ Tạo chat session mới cho IP hash: ${ipHash.substring(0, 8)}...`);
-    }
-    
-    return session;
-}
-
-// Lưu message vào session
-function saveMessageToSession(ipHash, content, sender, images = []) {
+// Lưu message vào Supabase
+async function saveMessageToSupabase(ipHash, content, sender, images = []) {
     try {
-        const session = getOrCreateSession(ipHash);
-        const now = Date.now();
+        console.log(`💾 Saving ${sender} message to Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
         
-        session.messages.push({
-            content: content,
-            sender: sender, // 'user' hoặc 'ai'
-            images: images,
-            timestamp: now
+        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString(); // 24h from now
+        
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/chat_sessions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+                ip_hash: ipHash,
+                content: content,
+                sender: sender,
+                images: images,
+                expires_at: expiresAt
+            })
         });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log(`✅ Saved ${sender} message to Supabase:`, result[0]?.id);
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error saving to Supabase:', response.status, error);
+            return false;
+        }
         
-        session.lastActivity = now;
-        chatSessions.set(ipHash, session);
-        
-        console.log(`💾 Đã lưu tin nhắn ${sender} cho IP hash: ${ipHash.substring(0, 8)}... (${session.messages.length} messages total)`);
-        
-        return true;
     } catch (error) {
-        console.error('❌ Lỗi khi lưu message vào session:', error);
+        console.error('❌ Exception saving message to Supabase:', error);
+        return false;
+    }
+}
+
+// Lấy messages từ Supabase theo IP hash
+async function getMessagesFromSupabase(ipHash) {
+    try {
+        console.log(`📖 Loading messages from Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        // Get messages that haven't expired, ordered by creation time
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?ip_hash=eq.${ipHash}&expires_at=gte.${new Date().toISOString()}&order=created_at.asc`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`✅ Loaded ${data.length} messages from Supabase`);
+            
+            // Transform to frontend format
+            const messages = data.map(row => ({
+                content: row.content,
+                sender: row.sender,
+                images: row.images || [],
+                timestamp: new Date(row.created_at).getTime()
+            }));
+            
+            // Calculate session info
+            const sessionInfo = data.length > 0 ? {
+                messageCount: data.length,
+                createdAt: new Date(data[0].created_at).getTime(),
+                expiresAt: new Date(data[0].expires_at).getTime(),
+                timeRemaining: Math.max(0, new Date(data[0].expires_at).getTime() - Date.now())
+            } : null;
+            
+            return { messages, sessionInfo };
+        } else {
+            const error = await response.text();
+            console.error('❌ Error loading from Supabase:', response.status, error);
+            return { messages: [], sessionInfo: null };
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception loading messages from Supabase:', error);
+        return { messages: [], sessionInfo: null };
+    }
+}
+
+// Xóa messages hết hạn (cleanup)
+async function cleanupExpiredMessages() {
+    try {
+        console.log('🧹 Cleaning up expired chat messages...');
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?expires_at=lt.${new Date().toISOString()}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleaned up expired chat messages');
+        } else {
+            const error = await response.text();
+            console.error('❌ Error cleaning up expired messages:', response.status, error);
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception cleaning up expired messages:', error);
+    }
+}
+
+// Xóa tất cả messages của một IP
+async function clearMessagesForIP(ipHash) {
+    try {
+        console.log(`🗑️ Clearing all messages for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?ip_hash=eq.${ipHash}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleared all messages for IP');
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error clearing messages:', response.status, error);
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception clearing messages:', error);
         return false;
     }
 }
@@ -273,11 +354,11 @@ app.get('/', (req, res) => {
     res.json({ 
         message: 'DeepSeek Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
-        version: '2.1.0',
+        version: '2.2.0',
         ai_provider: 'DeepSeek AI',
         storage: 'Supabase PostgreSQL',
-        chat_history: 'In-Memory (24h)',
-        features: ['Chat History', 'IP-based Sessions', 'Auto Cleanup'],
+        chat_history: 'Supabase (24h persistent)',
+        features: ['Chat History', 'IP-based Sessions', 'Persistent Storage'],
         env_check: {
             supabase_url: !!process.env.SUPABASE_URL,
             supabase_key: !!process.env.SUPABASE_ANON_KEY,
@@ -287,37 +368,22 @@ app.get('/', (req, res) => {
     });
 });
 
-// ===== NEW CHAT HISTORY ENDPOINTS =====
+// ===== CHAT HISTORY ENDPOINTS WITH SUPABASE =====
 
 // Lấy lịch sử chat theo IP
-app.get('/api/chat/history', (req, res) => {
+app.get('/api/chat/history', async (req, res) => {
     try {
-        cleanupExpiredSessions();
-        
         const ip = getRealIP(req);
         const ipHash = hashIP(ip);
-        const session = chatSessions.get(ipHash);
         
-        if (session && session.expiresAt > Date.now()) {
-            console.log(`📖 Trả về ${session.messages.length} tin nhắn cho IP hash: ${ipHash.substring(0, 8)}...`);
-            res.json({ 
-                success: true, 
-                messages: session.messages,
-                sessionInfo: {
-                    messageCount: session.messages.length,
-                    createdAt: session.createdAt,
-                    expiresAt: session.expiresAt,
-                    timeRemaining: Math.max(0, session.expiresAt - Date.now())
-                }
-            });
-        } else {
-            console.log(`📭 Không có lịch sử chat cho IP hash: ${ipHash.substring(0, 8)}...`);
-            res.json({ 
-                success: true, 
-                messages: [],
-                sessionInfo: null
-            });
-        }
+        const { messages, sessionInfo } = await getMessagesFromSupabase(ipHash);
+        
+        res.json({ 
+            success: true, 
+            messages: messages,
+            sessionInfo: sessionInfo
+        });
+        
     } catch (error) {
         console.error('❌ Lỗi khi lấy lịch sử chat:', error);
         res.status(500).json({ 
@@ -328,7 +394,7 @@ app.get('/api/chat/history', (req, res) => {
 });
 
 // Lưu tin nhắn vào lịch sử
-app.post('/api/chat/save', (req, res) => {
+app.post('/api/chat/save', async (req, res) => {
     try {
         const { message, sender, images = [] } = req.body;
         
@@ -350,7 +416,7 @@ app.post('/api/chat/save', (req, res) => {
         const ip = getRealIP(req);
         const ipHash = hashIP(ip);
         
-        const success = saveMessageToSession(ipHash, message, sender, images);
+        const success = await saveMessageToSupabase(ipHash, message, sender, images);
         
         if (success) {
             res.json({ success: true });
@@ -370,18 +436,21 @@ app.post('/api/chat/save', (req, res) => {
     }
 });
 
-// Xóa lịch sử chat (optional)
-app.delete('/api/chat/clear', (req, res) => {
+// Xóa lịch sử chat
+app.delete('/api/chat/clear', async (req, res) => {
     try {
         const ip = getRealIP(req);
         const ipHash = hashIP(ip);
         
-        if (chatSessions.has(ipHash)) {
-            chatSessions.delete(ipHash);
-            console.log(`🗑️ Đã xóa lịch sử chat cho IP hash: ${ipHash.substring(0, 8)}...`);
+        const success = await clearMessagesForIP(ipHash);
+        
+        if (success) {
             res.json({ success: true, message: 'Đã xóa lịch sử chat' });
         } else {
-            res.json({ success: true, message: 'Không có lịch sử chat để xóa' });
+            res.status(500).json({ 
+                success: false, 
+                error: 'Không thể xóa lịch sử chat' 
+            });
         }
         
     } catch (error) {
@@ -502,7 +571,6 @@ app.get('/api/questions', async (req, res) => {
 app.get('/health', async (req, res) => {
     try {
         const count = await countQuestions();
-        cleanupExpiredSessions();
         
         // Test DeepSeek API connection
         let deepseekStatus = 'Unknown';
@@ -520,10 +588,7 @@ app.get('/health', async (req, res) => {
             ai_provider: 'DeepSeek AI',
             deepseek_status: deepseekStatus,
             questionsCount: count,
-            chatSessions: {
-                active: chatSessions.size,
-                totalMessages: Array.from(chatSessions.values()).reduce((sum, session) => sum + session.messages.length, 0)
-            }
+            chatStorage: 'Supabase (persistent 24h)'
         });
     } catch (error) {
         res.json({ 
@@ -555,29 +620,63 @@ app.get('/api/test-deepseek', async (req, res) => {
     }
 });
 
-// API để xem thống kê chat sessions (debug)
-app.get('/api/chat/stats', (req, res) => {
+// API để xem thống kê chat sessions (debug) - từ Supabase
+app.get('/api/chat/stats', async (req, res) => {
     try {
-        cleanupExpiredSessions();
-        
-        const stats = {
-            totalSessions: chatSessions.size,
-            totalMessages: 0,
-            sessionsInfo: []
-        };
-        
-        for (let [ipHash, session] of chatSessions.entries()) {
-            stats.totalMessages += session.messages.length;
-            stats.sessionsInfo.push({
-                ipHash: ipHash.substring(0, 8) + '...',
-                messageCount: session.messages.length,
-                createdAt: new Date(session.createdAt).toISOString(),
-                expiresAt: new Date(session.expiresAt).toISOString(),
-                timeRemaining: Math.max(0, session.expiresAt - Date.now())
+        // Get stats from Supabase
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/chat_sessions?expires_at=gte.${new Date().toISOString()}&select=ip_hash,sender,created_at,expires_at`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            
+            // Group by IP hash
+            const sessionMap = new Map();
+            data.forEach(row => {
+                const key = row.ip_hash;
+                if (!sessionMap.has(key)) {
+                    sessionMap.set(key, {
+                        ipHash: key.substring(0, 8) + '...',
+                        messageCount: 0,
+                        firstMessage: row.created_at,
+                        expiresAt: row.expires_at
+                    });
+                }
+                sessionMap.get(key).messageCount++;
             });
+            
+            const stats = {
+                totalSessions: sessionMap.size,
+                totalMessages: data.length,
+                sessionsInfo: Array.from(sessionMap.values()).map(session => ({
+                    ...session,
+                    createdAt: session.firstMessage,
+                    timeRemaining: Math.max(0, new Date(session.expiresAt).getTime() - Date.now())
+                }))
+            };
+            
+            res.json(stats);
+        } else {
+            res.status(500).json({ error: 'Cannot fetch stats from Supabase' });
         }
         
-        res.json(stats);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+// Cleanup endpoint (manual trigger)
+app.post('/api/chat/cleanup', async (req, res) => {
+    try {
+        await cleanupExpiredMessages();
+        res.json({ success: true, message: 'Cleanup completed' });
     } catch (error) {
         res.status(500).json({ error: error.message });
     }
@@ -594,9 +693,9 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
-// Cleanup expired sessions every hour
+// Cleanup expired messages every hour
 setInterval(() => {
-    cleanupExpiredSessions();
+    cleanupExpiredMessages();
 }, 60 * 60 * 1000); // 1 hour
 
 // Start server
@@ -608,6 +707,7 @@ app.listen(PORT, () => {
     console.log(`🧪 Test DeepSeek: http://localhost:${PORT}/api/test-deepseek`);
     console.log(`💬 Chat history: http://localhost:${PORT}/api/chat/history`);
     console.log(`📊 Chat stats: http://localhost:${PORT}/api/chat/stats`);
+    console.log(`🧹 Cleanup: http://localhost:${PORT}/api/chat/cleanup`);
     
     console.log('\n🔧 Kiểm tra cấu hình:');
     if (!process.env.DEEPSEEK_API_KEY) {
@@ -636,7 +736,7 @@ app.listen(PORT, () => {
     
     console.log('\n🤖 AI Provider: DeepSeek AI');
     console.log('📖 Model: deepseek-chat');
-    console.log('💾 Chat Storage: In-Memory (24h auto-cleanup)');
+    console.log('💾 Chat Storage: Supabase PostgreSQL (24h persistent)');
 });
 
 module.exports = app;
