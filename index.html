@@ -271,7 +271,7 @@
         </div>
         
         <div class="chat-messages" id="chatMessages">
-            <!-- Exercise history will be loaded here -->
+            <!-- literature history will be loaded here -->
         </div>
 
         <div class="chat-input-container">
@@ -295,42 +295,42 @@
         // Backend URL - thay đổi URL này khi deploy backend
         const BACKEND_URL = 'http://localhost:3000'; // Hoặc 'https://edus-ai-deep.vercel.app'
 
-        let exerciseHistoryLoaded = false;
+        let literatureHistoryLoaded = false;
 
-        // ===== EXERCISE HISTORY FUNCTIONS =====
+        // ===== literature HISTORY FUNCTIONS =====
 
-        // Load exercise history from backend
-        async function loadExerciseHistory() {
+        // Load literature history from backend
+        async function loadliteratureHistory() {
             try {
-                console.log('🔄 Loading exercise history...');
+                console.log('🔄 Loading literature history...');
                 
-                const response = await fetch(`${BACKEND_URL}/api/exercise/history`);
+                const response = await fetch(`${BACKEND_URL}/api/literature/history`);
                 const data = await response.json();
                 
-                if (data.success && data.exercises.length > 0) {
-                    console.log(`✅ Loaded ${data.exercises.length} exercises from history`);
+                if (data.success && data.literatures.length > 0) {
+                    console.log(`✅ Loaded ${data.literatures.length} literatures from history`);
                     
                     // Clear any existing messages
                     chatMessages.innerHTML = '';
                     
-                    // Render exercise history (seamlessly)
-                    data.exercises.forEach(exercise => {
-                        addMessage(exercise.prompt, 'user', null, false, true);
-                        addMessage(exercise.result, 'ai', null, false, true);
+                    // Render literature history (seamlessly)
+                    data.literatures.forEach(literature => {
+                        addMessage(literature.prompt, 'user', null, false, true);
+                        addMessage(literature.result, 'ai', null, false, true);
                     });
                 } else {
-                    console.log('📭 No exercise history, starting fresh');
+                    console.log('📭 No literature history, starting fresh');
                     // Show welcome message for new session
                     addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
                 }
                 
-                exerciseHistoryLoaded = true;
+                literatureHistoryLoaded = true;
                 
             } catch (error) {
-                console.error('❌ Failed to load exercise history:', error);
+                console.error('❌ Failed to load literature history:', error);
                 // Show welcome message on error
                 addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
-                exerciseHistoryLoaded = true;
+                literatureHistoryLoaded = true;
             }
         }
 
@@ -365,8 +365,8 @@
             const message = messageInput.value.trim();
             if (!message || sendButton.disabled) return;
 
-            // Wait for exercise history to load first
-            if (!exerciseHistoryLoaded) {
+            // Wait for literature history to load first
+            if (!literatureHistoryLoaded) {
                 showNotification('⏳ Đang tải lịch sử bài tập, vui lòng đợi...', 'info');
                 return;
             }
@@ -381,7 +381,7 @@
             const loadingElement = showLoading();
 
             try {
-                const response = await fetch(`${BACKEND_URL}/api/exercise`, {
+                const response = await fetch(`${BACKEND_URL}/api/literature`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -432,7 +432,7 @@
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            // Note: Exercise messages are automatically saved by backend in /api/exercise endpoint
+            // Note: literature messages are automatically saved by backend in /api/literature endpoint
             // No need to manually save like chat messages
         }
 
@@ -467,17 +467,17 @@
             }, 5000);
         }
 
-        // Initialize with exercise history
+        // Initialize with literature history
         window.addEventListener('load', async () => {
-            console.log('🚀 Exercise page loaded, loading history...');
+            console.log('🚀 literature page loaded, loading history...');
             
-            // Load exercise history first
-            await loadExerciseHistory();
+            // Load literature history first
+            await loadliteratureHistory();
             
             // Then focus input
             messageInput.focus();
             
-            console.log('✅ Exercise history loaded');
+            console.log('✅ literature history loaded');
         });
     </script>
 </body>

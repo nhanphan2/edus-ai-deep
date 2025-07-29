@@ -350,6 +350,157 @@ async function clearExercisesForIP(ipHash) {
     }
 }
 
+// ===== LITERATURE HISTORY FUNCTIONS WITH SUPABASE =====
+
+async function saveLiteratureToSupabase(ipHash, content, sender, formData = {}) {
+    try {
+        console.log(`💾 Saving ${sender} literature to Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const expiresAt = new Date(Date.now() + (24 * 60 * 60 * 1000)).toISOString();
+        
+        const response = await fetch(`${process.env.SUPABASE_URL}/rest/v1/literature_sessions`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'apikey': process.env.SUPABASE_ANON_KEY,
+                'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`,
+                'Prefer': 'return=representation'
+            },
+            body: JSON.stringify({
+                ip_hash: ipHash,
+                content: content,
+                sender: sender,
+                genre: formData.genre || null,
+                period: formData.period || null,
+                author: formData.author || null,
+                work_type: formData.workType || null,
+                analysis_type: formData.analysisType || null,
+                form_data: formData,
+                expires_at: expiresAt
+            })
+        });
+
+        if (response.ok) {
+            const result = await response.json();
+            console.log(`✅ Saved ${sender} literature to Supabase:`, result[0]?.id);
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error saving literature to Supabase:', response.status, error);
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception saving literature to Supabase:', error);
+        return false;
+    }
+}
+
+async function getLiteratureFromSupabase(ipHash) {
+    try {
+        console.log(`📖 Loading literature from Supabase for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/literature_sessions?ip_hash=eq.${ipHash}&expires_at=gte.${new Date().toISOString()}&order=created_at.asc&limit=10`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            console.log(`✅ Loaded ${data.length} literature entries from Supabase`);
+            
+            const literatureEntries = [];
+            for (let i = 0; i < data.length; i += 2) {
+                const userMsg = data[i];
+                const aiMsg = data[i + 1];
+                
+                if (userMsg && aiMsg && userMsg.sender === 'user' && aiMsg.sender === 'ai') {
+                    literatureEntries.push({
+                        prompt: userMsg.content,
+                        result: aiMsg.content,
+                        formData: userMsg.form_data || {},
+                        timestamp: new Date(userMsg.created_at).getTime()
+                    });
+                }
+            }
+            
+            const recentLiterature = literatureEntries.slice(-5);
+            
+            return { literature: recentLiterature };
+        } else {
+            const error = await response.text();
+            console.error('❌ Error loading literature from Supabase:', response.status, error);
+            return { literature: [] };
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception loading literature from Supabase:', error);
+        return { literature: [] };
+    }
+}
+
+async function cleanupExpiredLiterature() {
+    try {
+        console.log('🧹 Cleaning up expired literature...');
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/literature_sessions?expires_at=lt.${new Date().toISOString()}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleaned up expired literature');
+        } else {
+            const error = await response.text();
+            console.error('❌ Error cleaning up expired literature:', response.status, error);
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception cleaning up expired literature:', error);
+    }
+}
+
+async function clearLiteratureForIP(ipHash) {
+    try {
+        console.log(`🗑️ Clearing all literature for IP hash: ${ipHash.substring(0, 8)}...`);
+        
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/literature_sessions?ip_hash=eq.${ipHash}`,
+            {
+                method: 'DELETE',
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            console.log('✅ Cleared all literature for IP');
+            return true;
+        } else {
+            const error = await response.text();
+            console.error('❌ Error clearing literature:', response.status, error);
+            return false;
+        }
+        
+    } catch (error) {
+        console.error('❌ Exception clearing literature:', error);
+        return false;
+    }
+}
+
 // ===== QUESTION FUNCTIONS =====
 
 async function saveQuestion(question, userIP) {
@@ -854,6 +1005,247 @@ app.post('/api/exercise/cleanup', async (req, res) => {
     }
 });
 
+// ===== LITERATURE ENDPOINTS =====
+
+app.post('/api/literature', async (req, res) => {
+    try {
+        const { message, formData } = req.body;
+
+        console.log('📖 Nhận được yêu cầu phân tích văn học:', message?.substring(0, 100) + '...');
+
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ 
+                error: 'Prompt phân tích văn học không hợp lệ' 
+            });
+        }
+
+        if (message.length > 8000) {
+            return res.status(400).json({ 
+                error: 'Prompt quá dài (tối đa 8000 ký tự)' 
+            });
+        }
+
+        if (!process.env.DEEPSEEK_API_KEY) {
+            return res.status(500).json({ 
+                error: 'Server chưa được cấu hình DeepSeek API key' 
+            });
+        }
+
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+
+        // Lưu user message vào Supabase trước
+        await saveLiteratureToSupabase(ipHash, message, 'user', formData);
+
+        // Gọi DeepSeek API với system prompt đặc biệt cho văn học
+        const literatureSystemPrompt = 'Bạn là một chuyên gia phân tích văn học với kiến thức sâu rộng về văn học Việt Nam và thế giới. Hãy phân tích một cách chi tiết, sâu sắc và có tính học thuật. Trả lời bằng tiếng Việt với ngôn ngữ trang trọng, phù hợp với phân tích văn học.';
+        
+        const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    {
+                        role: 'system',
+                        content: literatureSystemPrompt
+                    },
+                    {
+                        role: 'user',
+                        content: message
+                    }
+                ],
+                max_tokens: 3000,
+                temperature: 0.8,
+                top_p: 0.95,
+                frequency_penalty: 0.1,
+                presence_penalty: 0.1,
+                stream: false
+            })
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ DeepSeek API Error:', errorText);
+            throw new Error(`DeepSeek API Error: ${errorText}`);
+        }
+
+        const data = await response.json();
+        const aiResponse = data.choices[0].message.content;
+
+        // Lưu AI response vào Supabase
+        await saveLiteratureToSupabase(ipHash, aiResponse, 'ai', formData);
+
+        // Lưu vào questions table để tracking
+        const trackingMsg = `[LITERATURE] ${message.trim()}`;
+await saveQuestion(trackingMsg, ip);
+
+        res.json({ 
+            response: aiResponse,
+            timestamp: new Date().toISOString(),
+            provider: 'DeepSeek AI',
+            model: 'deepseek-chat',
+            type: 'literature'
+        });
+
+    } catch (error) {
+        console.error('Error in /api/literature:', error);
+        
+        if (error.message.includes('insufficient_quota') || error.message.includes('quota')) {
+            res.status(503).json({ 
+                error: 'Đã hết hạn mức sử dụng API DeepSeek. Vui lòng thử lại sau.' 
+            });
+        } else if (error.message.includes('rate_limit') || error.message.includes('too_many_requests')) {
+            res.status(429).json({ 
+                error: 'Quá nhiều yêu cầu. Vui lòng chờ một chút.' 
+            });
+        } else if (error.message.includes('invalid_api_key')) {
+            res.status(401).json({ 
+                error: 'API key không hợp lệ.' 
+            });
+        } else {
+            res.status(500).json({ 
+                error: 'Có lỗi xảy ra khi phân tích văn học. Vui lòng thử lại sau.'
+            });
+        }
+    }
+});
+
+app.get('/api/literature/history', async (req, res) => {
+    try {
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        
+        const { literature } = await getLiteratureFromSupabase(ipHash);
+        
+        res.json({ 
+            success: true, 
+            literature: literature
+        });
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi lấy lịch sử phân tích văn học:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+app.delete('/api/literature/clear', async (req, res) => {
+    try {
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        
+        const success = await clearLiteratureForIP(ipHash);
+        
+        if (success) {
+            res.json({ success: true, message: 'Đã xóa lịch sử phân tích văn học' });
+        } else {
+            res.status(500).json({ 
+                success: false, 
+                error: 'Không thể xóa lịch sử phân tích văn học' 
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi xóa lịch sử phân tích văn học:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+app.get('/api/literature/stats', async (req, res) => {
+    try {
+        const response = await fetch(
+            `${process.env.SUPABASE_URL}/rest/v1/literature_sessions?expires_at=gte.${new Date().toISOString()}&select=ip_hash,sender,genre,period,author,work_type,analysis_type,created_at,expires_at`,
+            {
+                headers: {
+                    'apikey': process.env.SUPABASE_ANON_KEY,
+                    'Authorization': `Bearer ${process.env.SUPABASE_ANON_KEY}`
+                }
+            }
+        );
+
+        if (response.ok) {
+            const data = await response.json();
+            
+            const sessionMap = new Map();
+            const genreStats = {};
+            const periodStats = {};
+            const authorStats = {};
+            const workTypeStats = {};
+            const analysisTypeStats = {};
+            
+            data.forEach(row => {
+                const key = row.ip_hash;
+                if (!sessionMap.has(key)) {
+                    sessionMap.set(key, {
+                        ipHash: key.substring(0, 8) + '...',
+                        literatureCount: 0,
+                        firstLiterature: row.created_at,
+                        expiresAt: row.expires_at
+                    });
+                }
+                sessionMap.get(key).literatureCount++;
+                
+                // Stats by category
+                if (row.genre) {
+                    genreStats[row.genre] = (genreStats[row.genre] || 0) + 1;
+                }
+                if (row.period) {
+                    periodStats[row.period] = (periodStats[row.period] || 0) + 1;
+                }
+                if (row.author) {
+                    authorStats[row.author] = (authorStats[row.author] || 0) + 1;
+                }
+                if (row.work_type) {
+                    workTypeStats[row.work_type] = (workTypeStats[row.work_type] || 0) + 1;
+                }
+                if (row.analysis_type) {
+                    analysisTypeStats[row.analysis_type] = (analysisTypeStats[row.analysis_type] || 0) + 1;
+                }
+            });
+            
+            const stats = {
+                totalSessions: sessionMap.size,
+                totalLiterature: data.length,
+                genreDistribution: genreStats,
+                periodDistribution: periodStats,
+                authorDistribution: authorStats,
+                workTypeDistribution: workTypeStats,
+                analysisTypeDistribution: analysisTypeStats,
+                sessionsInfo: Array.from(sessionMap.values()).map(session => ({
+                    ...session,
+                    createdAt: session.firstLiterature,
+                    timeRemaining: Math.max(0, new Date(session.expiresAt).getTime() - Date.now())
+                }))
+            };
+            
+            res.json(stats);
+        } else {
+            res.status(500).json({ error: 'Cannot fetch literature stats from Supabase' });
+        }
+        
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
+app.post('/api/literature/cleanup', async (req, res) => {
+    try {
+        await cleanupExpiredLiterature();
+        res.json({ success: true, message: 'Literature cleanup completed' });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // ===== OTHER ENDPOINTS =====
 
 app.get('/api/questions', async (req, res) => {
@@ -1003,13 +1395,14 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
-// Cleanup interval
+// Cleanup interval - THÊM cleanupExpiredLiterature()
 setInterval(() => {
     cleanupExpiredMessages();
     cleanupExpiredExercises();
+    cleanupExpiredLiterature();    // THÊM DÒNG NÀY
 }, 60 * 60 * 1000);
 
-// Start server
+// Start server - THÊM CÁC ENDPOINT LITERATURE
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại port ${PORT}`);
     console.log(`📱 Health check: http://localhost:${PORT}/health`);
@@ -1022,6 +1415,14 @@ app.listen(PORT, () => {
     console.log(`📈 Exercise stats: http://localhost:${PORT}/api/exercise/stats`);
     console.log(`🗑️ Exercise clear: http://localhost:${PORT}/api/exercise/clear`);
     console.log(`🧹 Exercise cleanup: http://localhost:${PORT}/api/exercise/cleanup`);
+    
+    // THÊM CÁC DÒNG MỚI CHO LITERATURE:
+    console.log(`📖 Literature endpoint: http://localhost:${PORT}/api/literature`);
+    console.log(`📚 Literature history: http://localhost:${PORT}/api/literature/history`);
+    console.log(`📊 Literature stats: http://localhost:${PORT}/api/literature/stats`);
+    console.log(`🗑️ Literature clear: http://localhost:${PORT}/api/literature/clear`);
+    console.log(`🧹 Literature cleanup: http://localhost:${PORT}/api/literature/cleanup`);
+    
     console.log(`📝 Questions: http://localhost:${PORT}/api/questions`);
     console.log(`🧪 Test DeepSeek: http://localhost:${PORT}/api/test-deepseek`);
     
@@ -1054,7 +1455,8 @@ app.listen(PORT, () => {
     console.log('📖 Model: deepseek-chat');
     console.log('💾 Chat Storage: Supabase PostgreSQL (24h persistent)');
     console.log('📚 Exercise Storage: Supabase PostgreSQL (24h persistent)');
-    console.log('🗄️ Tables: chat_sessions, exercise_sessions, questions');
+    console.log('📖 Literature Storage: Supabase PostgreSQL (24h persistent)');  // THÊM DÒNG NÀY
+    console.log('🗄️ Tables: chat_sessions, exercise_sessions, literature_sessions, questions');  // CẬP NHẬT DÒNG NÀY
 });
 
 module.exports = app;
