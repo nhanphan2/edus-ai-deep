@@ -2,10 +2,14 @@
 const express = require('express');
 const cors = require('cors');
 const rateLimit = require('express-rate-limit');
+const crypto = require('crypto'); // Thêm để hash IP
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Chat sessions storage (in-memory)
+let chatSessions = new Map();
 
 // Middleware
 app.use(cors({
@@ -34,6 +38,89 @@ app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path} - IP: ${req.ip}`);
     next();
 });
+
+// ===== CHAT HISTORY FUNCTIONS =====
+
+// Lấy IP thật của user
+function getRealIP(req) {
+    return req.headers['x-forwarded-for']?.split(',')[0]?.trim() || 
+           req.headers['x-real-ip'] || 
+           req.connection.remoteAddress || 
+           req.socket.remoteAddress ||
+           req.ip || 'unknown';
+}
+
+// Hash IP để bảo mật
+function hashIP(ip) {
+    const salt = process.env.CHAT_SALT || 'default_chat_salt_2024';
+    return crypto.createHash('sha256').update(ip + salt).digest('hex');
+}
+
+// Dọn dẹp sessions hết hạn
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    for (let [key, session] of chatSessions.entries()) {
+        if (session.expiresAt < now) {
+            chatSessions.delete(key);
+            cleanedCount++;
+        }
+    }
+    
+    if (cleanedCount > 0) {
+        console.log(`🧹 Đã xóa ${cleanedCount} chat sessions hết hạn`);
+    }
+}
+
+// Lấy hoặc tạo session cho IP
+function getOrCreateSession(ipHash) {
+    cleanupExpiredSessions();
+    
+    let session = chatSessions.get(ipHash);
+    const now = Date.now();
+    
+    if (!session || session.expiresAt < now) {
+        // Tạo session mới
+        session = {
+            messages: [],
+            createdAt: now,
+            expiresAt: now + (24 * 60 * 60 * 1000), // 24h from now
+            lastActivity: now
+        };
+        chatSessions.set(ipHash, session);
+        console.log(`✨ Tạo chat session mới cho IP hash: ${ipHash.substring(0, 8)}...`);
+    }
+    
+    return session;
+}
+
+// Lưu message vào session
+function saveMessageToSession(ipHash, content, sender, images = []) {
+    try {
+        const session = getOrCreateSession(ipHash);
+        const now = Date.now();
+        
+        session.messages.push({
+            content: content,
+            sender: sender, // 'user' hoặc 'ai'
+            images: images,
+            timestamp: now
+        });
+        
+        session.lastActivity = now;
+        chatSessions.set(ipHash, session);
+        
+        console.log(`💾 Đã lưu tin nhắn ${sender} cho IP hash: ${ipHash.substring(0, 8)}... (${session.messages.length} messages total)`);
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Lỗi khi lưu message vào session:', error);
+        return false;
+    }
+}
+
+// ===== EXISTING FUNCTIONS =====
 
 // Hàm lưu câu hỏi vào Supabase
 async function saveQuestion(question, userIP) {
@@ -180,21 +267,133 @@ async function callDeepSeek(message) {
     return data.choices[0].message.content;
 }
 
-// Routes
+// ===== ROUTES =====
+
 app.get('/', (req, res) => {
     res.json({ 
         message: 'DeepSeek Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
-        version: '2.0.0',
+        version: '2.1.0',
         ai_provider: 'DeepSeek AI',
         storage: 'Supabase PostgreSQL',
+        chat_history: 'In-Memory (24h)',
+        features: ['Chat History', 'IP-based Sessions', 'Auto Cleanup'],
         env_check: {
             supabase_url: !!process.env.SUPABASE_URL,
             supabase_key: !!process.env.SUPABASE_ANON_KEY,
-            deepseek_key: !!process.env.DEEPSEEK_API_KEY
+            deepseek_key: !!process.env.DEEPSEEK_API_KEY,
+            chat_salt: !!process.env.CHAT_SALT
         }
     });
 });
+
+// ===== NEW CHAT HISTORY ENDPOINTS =====
+
+// Lấy lịch sử chat theo IP
+app.get('/api/chat/history', (req, res) => {
+    try {
+        cleanupExpiredSessions();
+        
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        const session = chatSessions.get(ipHash);
+        
+        if (session && session.expiresAt > Date.now()) {
+            console.log(`📖 Trả về ${session.messages.length} tin nhắn cho IP hash: ${ipHash.substring(0, 8)}...`);
+            res.json({ 
+                success: true, 
+                messages: session.messages,
+                sessionInfo: {
+                    messageCount: session.messages.length,
+                    createdAt: session.createdAt,
+                    expiresAt: session.expiresAt,
+                    timeRemaining: Math.max(0, session.expiresAt - Date.now())
+                }
+            });
+        } else {
+            console.log(`📭 Không có lịch sử chat cho IP hash: ${ipHash.substring(0, 8)}...`);
+            res.json({ 
+                success: true, 
+                messages: [],
+                sessionInfo: null
+            });
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi lấy lịch sử chat:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+// Lưu tin nhắn vào lịch sử
+app.post('/api/chat/save', (req, res) => {
+    try {
+        const { message, sender, images = [] } = req.body;
+        
+        // Validation
+        if (!message || !sender) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'message và sender là bắt buộc' 
+            });
+        }
+        
+        if (!['user', 'ai'].includes(sender)) {
+            return res.status(400).json({ 
+                success: false, 
+                error: 'sender phải là "user" hoặc "ai"' 
+            });
+        }
+        
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        
+        const success = saveMessageToSession(ipHash, message, sender, images);
+        
+        if (success) {
+            res.json({ success: true });
+        } else {
+            res.status(500).json({ 
+                success: false, 
+                error: 'Không thể lưu tin nhắn' 
+            });
+        }
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi lưu tin nhắn:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+// Xóa lịch sử chat (optional)
+app.delete('/api/chat/clear', (req, res) => {
+    try {
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        
+        if (chatSessions.has(ipHash)) {
+            chatSessions.delete(ipHash);
+            console.log(`🗑️ Đã xóa lịch sử chat cho IP hash: ${ipHash.substring(0, 8)}...`);
+            res.json({ success: true, message: 'Đã xóa lịch sử chat' });
+        } else {
+            res.json({ success: true, message: 'Không có lịch sử chat để xóa' });
+        }
+        
+    } catch (error) {
+        console.error('❌ Lỗi khi xóa lịch sử chat:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
+    }
+});
+
+// ===== EXISTING CHAT ENDPOINT (MODIFIED) =====
 
 app.post('/api/chat', async (req, res) => {
     try {
@@ -224,7 +423,7 @@ app.post('/api/chat', async (req, res) => {
             });
         }
 
-        // Lưu câu hỏi của người dùng vào Supabase
+        // Lưu câu hỏi của người dùng vào Supabase (existing function)
         await saveQuestion(message.trim(), req.ip);
 
         // Xử lý hình ảnh (nếu có) - DeepSeek có thể hỗ trợ vision trong tương lai
@@ -235,6 +434,9 @@ app.post('/api/chat', async (req, res) => {
 
         // Gọi DeepSeek API
         const aiResponse = await callDeepSeek(fullMessage);
+
+        // NOTE: Chat history được lưu thông qua frontend call tới /api/chat/save
+        // Không auto-save ở đây để tránh duplicate khi load lại trang
 
         res.json({ 
             response: aiResponse,
@@ -267,6 +469,8 @@ app.post('/api/chat', async (req, res) => {
     }
 });
 
+// ===== EXISTING ENDPOINTS =====
+
 // API để xem các câu hỏi đã lưu từ Supabase
 app.get('/api/questions', async (req, res) => {
     try {
@@ -298,6 +502,7 @@ app.get('/api/questions', async (req, res) => {
 app.get('/health', async (req, res) => {
     try {
         const count = await countQuestions();
+        cleanupExpiredSessions();
         
         // Test DeepSeek API connection
         let deepseekStatus = 'Unknown';
@@ -314,7 +519,11 @@ app.get('/health', async (req, res) => {
             database: 'Connected to Supabase',
             ai_provider: 'DeepSeek AI',
             deepseek_status: deepseekStatus,
-            questionsCount: count
+            questionsCount: count,
+            chatSessions: {
+                active: chatSessions.size,
+                totalMessages: Array.from(chatSessions.values()).reduce((sum, session) => sum + session.messages.length, 0)
+            }
         });
     } catch (error) {
         res.json({ 
@@ -346,6 +555,34 @@ app.get('/api/test-deepseek', async (req, res) => {
     }
 });
 
+// API để xem thống kê chat sessions (debug)
+app.get('/api/chat/stats', (req, res) => {
+    try {
+        cleanupExpiredSessions();
+        
+        const stats = {
+            totalSessions: chatSessions.size,
+            totalMessages: 0,
+            sessionsInfo: []
+        };
+        
+        for (let [ipHash, session] of chatSessions.entries()) {
+            stats.totalMessages += session.messages.length;
+            stats.sessionsInfo.push({
+                ipHash: ipHash.substring(0, 8) + '...',
+                messageCount: session.messages.length,
+                createdAt: new Date(session.createdAt).toISOString(),
+                expiresAt: new Date(session.expiresAt).toISOString(),
+                timeRemaining: Math.max(0, session.expiresAt - Date.now())
+            });
+        }
+        
+        res.json(stats);
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 // 404 handler
 app.use('*', (req, res) => {
     res.status(404).json({ error: 'Endpoint không tồn tại' });
@@ -357,6 +594,11 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
+// Cleanup expired sessions every hour
+setInterval(() => {
+    cleanupExpiredSessions();
+}, 60 * 60 * 1000); // 1 hour
+
 // Start server
 app.listen(PORT, () => {
     console.log(`🚀 Server đang chạy tại port ${PORT}`);
@@ -364,6 +606,8 @@ app.listen(PORT, () => {
     console.log(`🤖 API endpoint: http://localhost:${PORT}/api/chat`);
     console.log(`📝 Xem câu hỏi: http://localhost:${PORT}/api/questions`);
     console.log(`🧪 Test DeepSeek: http://localhost:${PORT}/api/test-deepseek`);
+    console.log(`💬 Chat history: http://localhost:${PORT}/api/chat/history`);
+    console.log(`📊 Chat stats: http://localhost:${PORT}/api/chat/stats`);
     
     console.log('\n🔧 Kiểm tra cấu hình:');
     if (!process.env.DEEPSEEK_API_KEY) {
@@ -384,8 +628,15 @@ app.listen(PORT, () => {
         console.log('✅ SUPABASE_ANON_KEY đã được cấu hình');
     }
     
+    if (!process.env.CHAT_SALT) {
+        console.warn('⚠️  CẢNH BÁO: Nên thêm CHAT_SALT vào file .env để bảo mật tốt hơn');
+    } else {
+        console.log('✅ CHAT_SALT đã được cấu hình');
+    }
+    
     console.log('\n🤖 AI Provider: DeepSeek AI');
     console.log('📖 Model: deepseek-chat');
+    console.log('💾 Chat Storage: In-Memory (24h auto-cleanup)');
 });
 
 module.exports = app;

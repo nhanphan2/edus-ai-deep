@@ -40,6 +40,7 @@
             padding: 20px;
             text-align: center;
             border-radius: 20px 20px 0 0;
+            position: relative;
         }
 
         .chat-header h1 {
@@ -50,6 +51,37 @@
         .chat-header p {
             opacity: 0.9;
             font-size: 0.9rem;
+        }
+
+        /* History status indicator */
+        .history-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        .clear-chat-btn {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.3s ease;
+        }
+
+        .clear-chat-btn:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: scale(1.05);
         }
 
         .chat-messages {
@@ -67,6 +99,14 @@
             border-radius: 18px;
             word-wrap: break-word;
             animation: slideIn 0.3s ease-out;
+            position: relative;
+        }
+
+        .message-timestamp {
+            font-size: 0.7rem;
+            opacity: 0.6;
+            margin-top: 5px;
+            text-align: right;
         }
 
         .user-message {
@@ -82,6 +122,11 @@
             color: #333;
             border-bottom-left-radius: 5px;
             border-left: 4px solid #667eea;
+        }
+
+        .restored-message {
+            opacity: 0.8;
+            border: 1px dashed #ccc;
         }
 
         .loading {
@@ -171,6 +216,26 @@
             margin: 10px 20px;
         }
 
+        .notification {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #4caf50;
+            color: white;
+            padding: 10px 20px;
+            border-radius: 10px;
+            z-index: 1000;
+            animation: slideInRight 0.3s ease-out;
+        }
+
+        .notification.error {
+            background: #f44336;
+        }
+
+        .notification.info {
+            background: #2196f3;
+        }
+
         @keyframes slideIn {
             from {
                 opacity: 0;
@@ -179,6 +244,17 @@
             to {
                 opacity: 1;
                 transform: translateY(0);
+            }
+        }
+
+        @keyframes slideInRight {
+            from {
+                opacity: 0;
+                transform: translateX(100px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
             }
         }
 
@@ -199,10 +275,22 @@
             
             .chat-header {
                 border-radius: 0;
+                padding: 15px;
+            }
+            
+            .chat-header h1 {
+                font-size: 1.5rem;
             }
             
             .message {
                 max-width: 90%;
+            }
+
+            .clear-chat-btn,
+            .history-status {
+                position: static;
+                display: inline-block;
+                margin: 5px;
             }
         }
 
@@ -229,14 +317,18 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
+            <button class="clear-chat-btn" onclick="clearChatHistory()" title="Xóa lịch sử chat">
+                🗑️ Xóa lịch sử
+            </button>
+            <div class="history-status" id="historyStatus">
+                💾 Đang tải...
+            </div>
             <h1>🤖 AI Chat Assistant</h1>
             <p>Đặt câu hỏi và nhận câu trả lời từ AI</p>
         </div>
         
         <div class="chat-messages" id="chatMessages">
-            <div class="message ai-message">
-                Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊
-            </div>
+            <!-- Messages will be loaded here -->
         </div>
 
         <div class="chat-input-container">
@@ -256,9 +348,134 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        const historyStatus = document.getElementById('historyStatus');
         
         // Backend URL - thay đổi URL này khi deploy backend
         const BACKEND_URL = 'http://localhost:3000'; // Thay bằng URL backend của bạn
+
+        let chatHistoryLoaded = false;
+        let sessionInfo = null;
+
+        // ===== CHAT HISTORY FUNCTIONS =====
+
+        // Load chat history from backend
+        async function loadChatHistory() {
+            try {
+                console.log('🔄 Loading chat history...');
+                historyStatus.textContent = '💾 Đang tải lịch sử...';
+                
+                const response = await fetch(`${BACKEND_URL}/api/chat/history`);
+                const data = await response.json();
+                
+                if (data.success && data.messages.length > 0) {
+                    console.log(`✅ Loaded ${data.messages.length} messages from history`);
+                    
+                    // Clear any existing messages
+                    chatMessages.innerHTML = '';
+                    
+                    // Render saved messages
+                    data.messages.forEach(msg => {
+                        addMessage(msg.content, msg.sender, new Date(msg.timestamp), true);
+                    });
+                    
+                    sessionInfo = data.sessionInfo;
+                    updateHistoryStatus(data.sessionInfo);
+                    showNotification(`📜 Đã khôi phục ${data.messages.length} tin nhắn`, 'info');
+                } else {
+                    console.log('📭 No chat history found');
+                    // Show welcome message for new users
+                    addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
+                    historyStatus.textContent = '💾 Mới';
+                }
+                
+                chatHistoryLoaded = true;
+                
+            } catch (error) {
+                console.error('❌ Failed to load chat history:', error);
+                // Show welcome message on error
+                addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
+                historyStatus.textContent = '💾 Lỗi tải';
+                showNotification('⚠️ Không thể tải lịch sử chat', 'error');
+                chatHistoryLoaded = true;
+            }
+        }
+
+        // Save message to backend
+        async function saveMessageToBackend(content, sender, images = []) {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chat/save`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: content,
+                        sender: sender,
+                        images: images
+                    })
+                });
+
+                const data = await response.json();
+                if (!data.success) {
+                    console.error('❌ Failed to save message:', data.error);
+                }
+            } catch (error) {
+                console.error('❌ Error saving message:', error);
+            }
+        }
+
+        // Clear chat history
+        async function clearChatHistory() {
+            if (!confirm('Bạn có chắc muốn xóa toàn bộ lịch sử chat không?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chat/clear`, {
+                    method: 'DELETE'
+                });
+
+                const data = await response.json();
+                if (data.success) {
+                    // Clear UI
+                    chatMessages.innerHTML = '';
+                    // Show welcome message
+                    addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
+                    historyStatus.textContent = '💾 Đã xóa';
+                    showNotification('🗑️ Đã xóa lịch sử chat', 'info');
+                } else {
+                    showNotification('❌ Lỗi khi xóa lịch sử', 'error');
+                }
+            } catch (error) {
+                console.error('❌ Error clearing chat:', error);
+                showNotification('❌ Lỗi khi xóa lịch sử', 'error');
+            }
+        }
+
+        // Update history status display
+        function updateHistoryStatus(sessionInfo) {
+            if (sessionInfo) {
+                const timeRemaining = Math.floor(sessionInfo.timeRemaining / (1000 * 60 * 60)); // hours
+                historyStatus.textContent = `💾 ${sessionInfo.messageCount} tin nhắn (${timeRemaining}h còn lại)`;
+            } else {
+                historyStatus.textContent = '💾 Mới';
+            }
+        }
+
+        // Show notification
+        function showNotification(message, type = 'success') {
+            const notification = document.createElement('div');
+            notification.className = `notification ${type}`;
+            notification.textContent = message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+
+        // ===== EXISTING FUNCTIONS (MODIFIED) =====
 
         // Auto-resize textarea
         messageInput.addEventListener('input', function() {
@@ -277,6 +494,12 @@
         async function sendMessage() {
             const message = messageInput.value.trim();
             if (!message || sendButton.disabled) return;
+
+            // Wait for chat history to load first
+            if (!chatHistoryLoaded) {
+                showNotification('⏳ Đang tải lịch sử, vui lòng đợi...', 'info');
+                return;
+            }
 
             // Add user message to chat
             addMessage(message, 'user');
@@ -306,6 +529,9 @@
                 loadingElement.remove();
                 addMessage(data.response, 'ai');
 
+                // Update history status
+                historyStatus.textContent = '💾 Đã lưu';
+
             } catch (error) {
                 console.error('Error:', error);
                 loadingElement.remove();
@@ -316,13 +542,49 @@
             }
         }
 
-        function addMessage(content, sender) {
+        function addMessage(content, sender, timestamp = null, isRestored = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender}-message`;
-            messageDiv.textContent = content;
+            
+            if (isRestored) {
+                messageDiv.classList.add('restored-message');
+            }
+            
+            // Add message content
+            const contentDiv = document.createElement('div');
+            contentDiv.textContent = content;
+            messageDiv.appendChild(contentDiv);
+            
+            // Add timestamp if provided
+            if (timestamp) {
+                const timestampDiv = document.createElement('div');
+                timestampDiv.className = 'message-timestamp';
+                timestampDiv.textContent = formatTimestamp(timestamp);
+                messageDiv.appendChild(timestampDiv);
+            }
             
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
+
+            // Save to backend (only for new messages, not restored ones)
+            if (!isRestored) {
+                saveMessageToBackend(content, sender);
+            }
+        }
+
+        function formatTimestamp(date) {
+            const now = new Date();
+            const messageDate = new Date(date);
+            const diffMs = now - messageDate;
+            const diffMins = Math.floor(diffMs / 60000);
+            const diffHours = Math.floor(diffMs / 3600000);
+
+            if (diffMins < 1) return 'vừa xong';
+            if (diffMins < 60) return `${diffMins} phút trước`;
+            if (diffHours < 24) return `${diffHours} giờ trước`;
+            
+            return messageDate.toLocaleDateString('vi-VN') + ' ' + 
+                   messageDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
         }
 
         function showLoading() {
@@ -357,10 +619,32 @@
             }, 5000);
         }
 
-        // Focus input on page load
-        window.addEventListener('load', () => {
+        // ===== INITIALIZATION =====
+
+        // Load chat history and focus input on page load
+        window.addEventListener('load', async () => {
+            console.log('🚀 Page loaded, initializing...');
+            
+            // Load chat history first
+            await loadChatHistory();
+            
+            // Then focus input
             messageInput.focus();
+            
+            console.log('✅ Initialization complete');
         });
+
+        // Periodically update time remaining
+        setInterval(() => {
+            if (sessionInfo) {
+                sessionInfo.timeRemaining -= 60000; // subtract 1 minute
+                if (sessionInfo.timeRemaining > 0) {
+                    updateHistoryStatus(sessionInfo);
+                } else {
+                    historyStatus.textContent = '💾 Hết hạn';
+                }
+            }
+        }, 60000); // Update every minute
     </script>
 </body>
 </html>
