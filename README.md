@@ -169,3 +169,21 @@ npm install
 OPENAI_API_KEY: API key thật
 FRONTEND_URL:
 NODE_ENV: production
+
+
+Update Git
+# Xem remote URL hiện tại
+git remote -v
+
+cd D:\appamazon\chat
+
+# Đổi remote URL sang repo đúng
+git remote set-url origin https://github.com/nhanphan2/edus-ai-deep.git
+
+# Kiểm tra lại
+git remote -v
+
+# Bây giờ push
+git add .
+git commit -m "Update chat history feature"
+git push origin main --force

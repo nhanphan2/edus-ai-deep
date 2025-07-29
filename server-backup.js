@@ -202,7 +202,69 @@ async function clearMessagesForIP(ipHash) {
 }
 
 // ===== EXISTING FUNCTIONS =====
+// ===== EXERCISE HISTORY FUNCTIONS =====
 
+// Exercise sessions storage (separate from chat)
+let exerciseSessions = new Map();
+
+// Exercise-specific cleanup function
+function cleanupExpiredExerciseSessions() {
+    const now = Date.now();
+    let cleanedCount = 0;
+    
+    for (let [key, session] of exerciseSessions.entries()) {
+        if (session.expiresAt < now) {
+            exerciseSessions.delete(key);
+            cleanedCount++;
+        }
+    }
+    
+    if (cleanedCount > 0) {
+        console.log(`🧹 Đã xóa ${cleanedCount} exercise sessions hết hạn`);
+    }
+}
+
+// Save exercise to session
+function saveExerciseToSession(ipHash, prompt, result, formData) {
+    try {
+        cleanupExpiredExerciseSessions();
+        
+        let session = exerciseSessions.get(ipHash);
+        const now = Date.now();
+        
+        if (!session || session.expiresAt < now) {
+            session = {
+                exercises: [],
+                createdAt: now,
+                expiresAt: now + (24 * 60 * 60 * 1000), // 24h
+                lastActivity: now
+            };
+        }
+        
+        // Add new exercise (keep only last 5 exercises per IP)
+        session.exercises.push({
+            prompt: prompt,
+            result: result,
+            formData: formData,
+            timestamp: now
+        });
+        
+        // Keep only last 5 exercises
+        if (session.exercises.length > 5) {
+            session.exercises = session.exercises.slice(-5);
+        }
+        
+        session.lastActivity = now;
+        exerciseSessions.set(ipHash, session);
+        
+        console.log(`💾 Đã lưu exercise cho IP hash: ${ipHash.substring(0, 8)}... (${session.exercises.length} exercises total)`);
+        
+        return true;
+    } catch (error) {
+        console.error('❌ Lỗi khi lưu exercise:', error);
+        return false;
+    }
+}
 // Hàm lưu câu hỏi vào Supabase
 async function saveQuestion(question, userIP) {
     try {
@@ -493,7 +555,7 @@ app.post('/api/chat', async (req, res) => {
         }
 
         // Lưu câu hỏi của người dùng vào Supabase (existing function)
-        await saveQuestion(message.trim(), req.ip);
+        await saveQuestion(`[EXERCISE] ${formData?.subject || 'Mixed'} - ${message.substring(0, 100)}...`, req.ip);
 
         // Xử lý hình ảnh (nếu có) - DeepSeek có thể hỗ trợ vision trong tương lai
         let fullMessage = message.trim();
@@ -535,6 +597,108 @@ app.post('/api/chat', async (req, res) => {
                 details: process.env.NODE_ENV === 'development' ? error.message : undefined
             });
         }
+    }
+});
+// ===== EXERCISE ENDPOINTS =====
+
+// POST /api/exercise - Tạo bài tập
+app.post('/api/exercise', async (req, res) => {
+    try {
+        const { message, formData } = req.body;
+
+        console.log('📚 Nhận được yêu cầu tạo bài tập:', message?.substring(0, 100) + '...');
+
+        // Validation
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ 
+                error: 'Prompt bài tập không hợp lệ' 
+            });
+        }
+
+        if (message.length > 8000) {
+            return res.status(400).json({ 
+                error: 'Prompt quá dài (tối đa 8000 ký tự)' 
+            });
+        }
+
+        if (!process.env.DEEPSEEK_API_KEY) {
+            return res.status(500).json({ 
+                error: 'Server chưa được cấu hình DeepSeek API key' 
+            });
+        }
+
+        // Lấy IP và hash
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+
+        // Gọi DeepSeek API (dùng chung với chat)
+        const aiResponse = await callDeepSeek(message);
+
+        // Lưu exercise vào session riêng
+        saveExerciseToSession(ipHash, message, aiResponse, formData);
+
+        // Lưu vào Supabase (nếu muốn keep track)
+        await saveQuestion(`[EXERCISE] ${formData?.subject || 'Unknown'} - ${formData?.topic || 'Unknown'}`, ip);
+
+        res.json({ 
+            response: aiResponse,
+            timestamp: new Date().toISOString(),
+            provider: 'DeepSeek AI',
+            model: 'deepseek-chat',
+            type: 'exercise'
+        });
+
+    } catch (error) {
+        console.error('Error in /api/exercise:', error);
+        
+        if (error.message.includes('insufficient_quota') || error.message.includes('quota')) {
+            res.status(503).json({ 
+                error: 'Đã hết hạn mức sử dụng API DeepSeek. Vui lòng thử lại sau.' 
+            });
+        } else if (error.message.includes('rate_limit') || error.message.includes('too_many_requests')) {
+            res.status(429).json({ 
+                error: 'Quá nhiều yêu cầu. Vui lòng chờ một chút.' 
+            });
+        } else if (error.message.includes('invalid_api_key')) {
+            res.status(401).json({ 
+                error: 'API key không hợp lệ.' 
+            });
+        } else {
+            res.status(500).json({ 
+                error: 'Có lỗi xảy ra khi tạo bài tập. Vui lòng thử lại sau.'
+            });
+        }
+    }
+});
+
+// GET /api/exercise/history - Lấy lịch sử bài tập
+app.get('/api/exercise/history', (req, res) => {
+    try {
+        cleanupExpiredExerciseSessions();
+        
+        const ip = getRealIP(req);
+        const ipHash = hashIP(ip);
+        const session = exerciseSessions.get(ipHash);
+        
+        if (session && session.expiresAt > Date.now()) {
+            console.log(`📖 Trả về ${session.exercises.length} bài tập cho IP hash: ${ipHash.substring(0, 8)}...`);
+            res.json({ 
+                success: true, 
+                exercises: session.exercises
+            });
+        } else {
+            console.log(`📭 Không có lịch sử bài tập cho IP hash: ${ipHash.substring(0, 8)}...`);
+            res.json({ 
+                success: true, 
+                exercises: []
+            });
+        }
+    } catch (error) {
+        console.error('❌ Lỗi khi lấy lịch sử bài tập:', error);
+        res.status(500).json({ 
+            success: false, 
+            error: error.message 
+        });
     }
 });
 
@@ -693,9 +857,10 @@ app.use((error, req, res, next) => {
     res.status(500).json({ error: 'Lỗi server không xác định' });
 });
 
-// Cleanup expired messages every hour
+// Cleanup expired messages and exercises every hour
 setInterval(() => {
     cleanupExpiredMessages();
+    cleanupExpiredExerciseSessions();
 }, 60 * 60 * 1000); // 1 hour
 
 // Start server

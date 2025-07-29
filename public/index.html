@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Chat Assistant</title>
+    <title>AI Tạo Bài Tập</title>
     <style>
         * {
             margin: 0;
@@ -13,7 +13,7 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -35,12 +35,11 @@
         }
 
         .chat-header {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(45deg, #4CAF50, #45a049);
             color: white;
             padding: 20px;
             text-align: center;
             border-radius: 20px 20px 0 0;
-            position: relative;
         }
 
         .chat-header h1 {
@@ -51,37 +50,6 @@
         .chat-header p {
             opacity: 0.9;
             font-size: 0.9rem;
-        }
-
-        /* History status indicator */
-        .history-status {
-            position: absolute;
-            top: 10px;
-            right: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 5px 10px;
-            border-radius: 15px;
-            font-size: 0.8rem;
-            opacity: 0.8;
-        }
-
-        .clear-chat-btn {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(255, 255, 255, 0.2);
-            border: none;
-            color: white;
-            padding: 5px 10px;
-            border-radius: 15px;
-            cursor: pointer;
-            font-size: 0.8rem;
-            transition: all 0.3s ease;
-        }
-
-        .clear-chat-btn:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: scale(1.05);
         }
 
         .chat-messages {
@@ -99,19 +67,11 @@
             border-radius: 18px;
             word-wrap: break-word;
             animation: slideIn 0.3s ease-out;
-            position: relative;
-        }
-
-        .message-timestamp {
-            font-size: 0.7rem;
-            opacity: 0.6;
-            margin-top: 5px;
-            text-align: right;
         }
 
         .user-message {
             align-self: flex-end;
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(45deg, #4CAF50, #45a049);
             color: white;
             border-bottom-right-radius: 5px;
         }
@@ -121,12 +81,8 @@
             background: #f1f3f4;
             color: #333;
             border-bottom-left-radius: 5px;
-            border-left: 4px solid #667eea;
-        }
-
-        .restored-message {
-            opacity: 0.8;
-            border: 1px dashed #ccc;
+            border-left: 4px solid #4CAF50;
+            white-space: pre-wrap;
         }
 
         .loading {
@@ -146,7 +102,7 @@
         .loading-dot {
             width: 8px;
             height: 8px;
-            background: #667eea;
+            background: #4CAF50;
             border-radius: 50%;
             animation: bounce 1.4s infinite ease-in-out both;
         }
@@ -177,12 +133,12 @@
         }
 
         .chat-input:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            border-color: #4CAF50;
+            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
         }
 
         .send-button {
-            background: linear-gradient(45deg, #667eea, #764ba2);
+            background: linear-gradient(45deg, #4CAF50, #45a049);
             color: white;
             border: none;
             border-radius: 50%;
@@ -198,7 +154,7 @@
 
         .send-button:hover:not(:disabled) {
             transform: scale(1.05);
-            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
         }
 
         .send-button:disabled {
@@ -285,13 +241,6 @@
             .message {
                 max-width: 90%;
             }
-
-            .clear-chat-btn,
-            .history-status {
-                position: static;
-                display: inline-block;
-                margin: 5px;
-            }
         }
 
         /* Scrollbar styling */
@@ -317,29 +266,23 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <button class="clear-chat-btn" onclick="clearChatHistory()" title="Xóa lịch sử chat">
-                🗑️ Xóa lịch sử
-            </button>
-            <div class="history-status" id="historyStatus">
-                💾 Đang tải...
-            </div>
-            <h1>🤖 AI Chat Assistant</h1>
-            <p>Đặt câu hỏi và nhận câu trả lời từ AI</p>
+            <h1>📚 AI Tạo Bài Tập</h1>
+            <p>Tạo bài tập học tập với AI thông minh</p>
         </div>
         
         <div class="chat-messages" id="chatMessages">
-            <!-- Messages will be loaded here -->
+            <!-- Exercise history will be loaded here -->
         </div>
 
         <div class="chat-input-container">
             <textarea 
                 class="chat-input" 
                 id="messageInput" 
-                placeholder="Nhập câu hỏi của bạn..."
+                placeholder="Nhập yêu cầu tạo bài tập (ví dụ: Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết...)"
                 rows="1"
             ></textarea>
             <button class="send-button" id="sendButton" onclick="sendMessage()">
-                ➤
+                📚
             </button>
         </div>
     </div>
@@ -348,117 +291,46 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
-        const historyStatus = document.getElementById('historyStatus');
         
         // Backend URL - thay đổi URL này khi deploy backend
-        const BACKEND_URL = 'http://localhost:3000'; // Thay bằng URL backend của bạn
+        const BACKEND_URL = 'http://localhost:3000'; // Hoặc 'https://edus-ai-deep.vercel.app'
 
-        let chatHistoryLoaded = false;
-        let sessionInfo = null;
+        let exerciseHistoryLoaded = false;
 
-        // ===== CHAT HISTORY FUNCTIONS =====
+        // ===== EXERCISE HISTORY FUNCTIONS =====
 
-        // Load chat history from backend
-        async function loadChatHistory() {
+        // Load exercise history from backend
+        async function loadExerciseHistory() {
             try {
-                console.log('🔄 Loading chat history...');
-                historyStatus.textContent = '💾 Đang tải lịch sử...';
+                console.log('🔄 Loading exercise history...');
                 
-                const response = await fetch(`${BACKEND_URL}/api/chat/history`);
+                const response = await fetch(`${BACKEND_URL}/api/exercise/history`);
                 const data = await response.json();
                 
-                if (data.success && data.messages.length > 0) {
-                    console.log(`✅ Loaded ${data.messages.length} messages from history`);
+                if (data.success && data.exercises.length > 0) {
+                    console.log(`✅ Loaded ${data.exercises.length} exercises from history`);
                     
                     // Clear any existing messages
                     chatMessages.innerHTML = '';
                     
-                    // Render saved messages
-                    data.messages.forEach(msg => {
-                        addMessage(msg.content, msg.sender, new Date(msg.timestamp), true);
+                    // Render exercise history (seamlessly)
+                    data.exercises.forEach(exercise => {
+                        addMessage(exercise.prompt, 'user', null, false, true);
+                        addMessage(exercise.result, 'ai', null, false, true);
                     });
-                    
-                    sessionInfo = data.sessionInfo;
-                    updateHistoryStatus(data.sessionInfo);
-                    showNotification(`📜 Đã khôi phục ${data.messages.length} tin nhắn`, 'info');
                 } else {
-                    console.log('📭 No chat history found');
-                    // Show welcome message for new users
-                    addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
-                    historyStatus.textContent = '💾 Mới';
+                    console.log('📭 No exercise history, starting fresh');
+                    // Show welcome message for new session
+                    addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
                 }
                 
-                chatHistoryLoaded = true;
+                exerciseHistoryLoaded = true;
                 
             } catch (error) {
-                console.error('❌ Failed to load chat history:', error);
+                console.error('❌ Failed to load exercise history:', error);
                 // Show welcome message on error
-                addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
-                historyStatus.textContent = '💾 Lỗi tải';
-                showNotification('⚠️ Không thể tải lịch sử chat', 'error');
-                chatHistoryLoaded = true;
-            }
-        }
-
-        // Save message to backend
-        async function saveMessageToBackend(content, sender, images = []) {
-            try {
-                const response = await fetch(`${BACKEND_URL}/api/chat/save`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({
-                        message: content,
-                        sender: sender,
-                        images: images
-                    })
-                });
-
-                const data = await response.json();
-                if (!data.success) {
-                    console.error('❌ Failed to save message:', data.error);
-                }
-            } catch (error) {
-                console.error('❌ Error saving message:', error);
-            }
-        }
-
-        // Clear chat history
-        async function clearChatHistory() {
-            if (!confirm('Bạn có chắc muốn xóa toàn bộ lịch sử chat không?')) {
-                return;
-            }
-
-            try {
-                const response = await fetch(`${BACKEND_URL}/api/chat/clear`, {
-                    method: 'DELETE'
-                });
-
-                const data = await response.json();
-                if (data.success) {
-                    // Clear UI
-                    chatMessages.innerHTML = '';
-                    // Show welcome message
-                    addMessage('Xin chào! Tôi là AI Assistant. Bạn có thể hỏi tôi bất cứ điều gì. Hãy bắt đầu cuộc trò chuyện! 😊', 'ai');
-                    historyStatus.textContent = '💾 Đã xóa';
-                    showNotification('🗑️ Đã xóa lịch sử chat', 'info');
-                } else {
-                    showNotification('❌ Lỗi khi xóa lịch sử', 'error');
-                }
-            } catch (error) {
-                console.error('❌ Error clearing chat:', error);
-                showNotification('❌ Lỗi khi xóa lịch sử', 'error');
-            }
-        }
-
-        // Update history status display
-        function updateHistoryStatus(sessionInfo) {
-            if (sessionInfo) {
-                const timeRemaining = Math.floor(sessionInfo.timeRemaining / (1000 * 60 * 60)); // hours
-                historyStatus.textContent = `💾 ${sessionInfo.messageCount} tin nhắn (${timeRemaining}h còn lại)`;
-            } else {
-                historyStatus.textContent = '💾 Mới';
+                addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
+                exerciseHistoryLoaded = true;
             }
         }
 
@@ -474,8 +346,6 @@
                 notification.remove();
             }, 3000);
         }
-
-        // ===== EXISTING FUNCTIONS (MODIFIED) =====
 
         // Auto-resize textarea
         messageInput.addEventListener('input', function() {
@@ -495,9 +365,9 @@
             const message = messageInput.value.trim();
             if (!message || sendButton.disabled) return;
 
-            // Wait for chat history to load first
-            if (!chatHistoryLoaded) {
-                showNotification('⏳ Đang tải lịch sử, vui lòng đợi...', 'info');
+            // Wait for exercise history to load first
+            if (!exerciseHistoryLoaded) {
+                showNotification('⏳ Đang tải lịch sử bài tập, vui lòng đợi...', 'info');
                 return;
             }
 
@@ -511,12 +381,21 @@
             const loadingElement = showLoading();
 
             try {
-                const response = await fetch(`${BACKEND_URL}/api/chat`, {
+                const response = await fetch(`${BACKEND_URL}/api/exercise`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
-                    body: JSON.stringify({ message })
+                    body: JSON.stringify({ 
+                        message: message,
+                        formData: {
+                            subject: 'Mixed',
+                            grade: 'Mixed',
+                            difficulty: 'Mixed',
+                            topic: 'User Request',
+                            quantity: 'Variable'
+                        }
+                    })
                 });
 
                 if (!response.ok) {
@@ -529,69 +408,39 @@
                 loadingElement.remove();
                 addMessage(data.response, 'ai');
 
-                // Update history status
-                historyStatus.textContent = '💾 Đã lưu';
+                showNotification('✅ Đã tạo bài tập thành công!', 'success');
 
             } catch (error) {
                 console.error('Error:', error);
                 loadingElement.remove();
-                showError('Có lỗi xảy ra khi kết nối với server. Vui lòng thử lại.');
+                showError('Có lỗi xảy ra khi tạo bài tập. Vui lòng thử lại.');
             } finally {
                 sendButton.disabled = false;
                 messageInput.focus();
             }
         }
 
-        function addMessage(content, sender, timestamp = null, isRestored = false) {
+        function addMessage(content, sender, timestamp = null, isRestored = false, isFromHistory = false) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${sender}-message`;
-            
-            if (isRestored) {
-                messageDiv.classList.add('restored-message');
-            }
             
             // Add message content
             const contentDiv = document.createElement('div');
             contentDiv.textContent = content;
             messageDiv.appendChild(contentDiv);
             
-            // Add timestamp if provided
-            if (timestamp) {
-                const timestampDiv = document.createElement('div');
-                timestampDiv.className = 'message-timestamp';
-                timestampDiv.textContent = formatTimestamp(timestamp);
-                messageDiv.appendChild(timestampDiv);
-            }
-            
             chatMessages.appendChild(messageDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            // Save to backend (only for new messages, not restored ones)
-            if (!isRestored) {
-                saveMessageToBackend(content, sender);
-            }
-        }
-
-        function formatTimestamp(date) {
-            const now = new Date();
-            const messageDate = new Date(date);
-            const diffMs = now - messageDate;
-            const diffMins = Math.floor(diffMs / 60000);
-            const diffHours = Math.floor(diffMs / 3600000);
-
-            if (diffMins < 1) return 'vừa xong';
-            if (diffMins < 60) return `${diffMins} phút trước`;
-            if (diffHours < 24) return `${diffHours} giờ trước`;
-            
-            return messageDate.toLocaleDateString('vi-VN') + ' ' + 
-                   messageDate.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+            // Note: Exercise messages are automatically saved by backend in /api/exercise endpoint
+            // No need to manually save like chat messages
         }
 
         function showLoading() {
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'message loading';
             loadingDiv.innerHTML = `
-                <span>AI đang suy nghĩ</span>
+                <span>🤖 AI đang tạo bài tập...</span>
                 <div class="loading-dots">
                     <div class="loading-dot"></div>
                     <div class="loading-dot"></div>
@@ -613,38 +462,23 @@
             chatMessages.appendChild(errorDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
             
-            // Auto remove error after 5 seconds
             setTimeout(() => {
                 errorDiv.remove();
             }, 5000);
         }
 
-        // ===== INITIALIZATION =====
-
-        // Load chat history and focus input on page load
+        // Initialize with exercise history
         window.addEventListener('load', async () => {
-            console.log('🚀 Page loaded, initializing...');
+            console.log('🚀 Exercise page loaded, loading history...');
             
-            // Load chat history first
-            await loadChatHistory();
+            // Load exercise history first
+            await loadExerciseHistory();
             
             // Then focus input
             messageInput.focus();
             
-            console.log('✅ Initialization complete');
+            console.log('✅ Exercise history loaded');
         });
-
-        // Periodically update time remaining
-        setInterval(() => {
-            if (sessionInfo) {
-                sessionInfo.timeRemaining -= 60000; // subtract 1 minute
-                if (sessionInfo.timeRemaining > 0) {
-                    updateHistoryStatus(sessionInfo);
-                } else {
-                    historyStatus.textContent = '💾 Hết hạn';
-                }
-            }
-        }, 60000); // Update every minute
     </script>
 </body>
 </html>
