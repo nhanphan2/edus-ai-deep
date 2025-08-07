@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Tạo Bài Tập</title>
+    <title>AI Chat - DeepSeek Assistant</title>
     <style>
         * {
             margin: 0;
@@ -13,7 +13,7 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             min-height: 100vh;
             display: flex;
             align-items: center;
@@ -27,19 +27,20 @@
             border-radius: 20px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
             width: 100%;
-            max-width: 800px;
-            height: 600px;
+            max-width: 900px;
+            height: 700px;
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
 
         .chat-header {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
+            background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
             padding: 20px;
             text-align: center;
             border-radius: 20px 20px 0 0;
+            position: relative;
         }
 
         .chat-header h1 {
@@ -50,6 +51,35 @@
         .chat-header p {
             opacity: 0.9;
             font-size: 0.9rem;
+        }
+
+        .session-info {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 0.8rem;
+            opacity: 0.8;
+        }
+
+        .clear-button {
+            position: absolute;
+            left: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 15px;
+            cursor: pointer;
+            font-size: 0.8rem;
+            transition: all 0.3s ease;
+        }
+
+        .clear-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            transform: translateY(-50%) scale(1.05);
         }
 
         .chat-messages {
@@ -67,11 +97,12 @@
             border-radius: 18px;
             word-wrap: break-word;
             animation: slideIn 0.3s ease-out;
+            position: relative;
         }
 
         .user-message {
             align-self: flex-end;
-            background: linear-gradient(45deg, #4CAF50, #45a049);
+            background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
             border-bottom-right-radius: 5px;
         }
@@ -81,8 +112,23 @@
             background: #f1f3f4;
             color: #333;
             border-bottom-left-radius: 5px;
-            border-left: 4px solid #4CAF50;
+            border-left: 4px solid #667eea;
             white-space: pre-wrap;
+        }
+
+        .message-timestamp {
+            font-size: 0.7rem;
+            opacity: 0.6;
+            margin-top: 5px;
+            text-align: right;
+        }
+
+        .user-message .message-timestamp {
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .ai-message .message-timestamp {
+            color: rgba(0, 0, 0, 0.5);
         }
 
         .loading {
@@ -102,7 +148,7 @@
         .loading-dot {
             width: 8px;
             height: 8px;
-            background: #4CAF50;
+            background: #667eea;
             border-radius: 50%;
             animation: bounce 1.4s infinite ease-in-out both;
         }
@@ -119,8 +165,13 @@
             align-items: flex-end;
         }
 
-        .chat-input {
+        .input-wrapper {
             flex: 1;
+            position: relative;
+        }
+
+        .chat-input {
+            width: 100%;
             border: 2px solid #e0e0e0;
             border-radius: 25px;
             padding: 12px 20px;
@@ -133,12 +184,28 @@
         }
 
         .chat-input:focus {
-            border-color: #4CAF50;
-            box-shadow: 0 0 0 3px rgba(76, 175, 80, 0.1);
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        .char-counter {
+            position: absolute;
+            bottom: -20px;
+            right: 10px;
+            font-size: 0.7rem;
+            color: #666;
+        }
+
+        .char-counter.warning {
+            color: #ff9800;
+        }
+
+        .char-counter.danger {
+            color: #f44336;
         }
 
         .send-button {
-            background: linear-gradient(45deg, #4CAF50, #45a049);
+            background: linear-gradient(45deg, #667eea, #764ba2);
             color: white;
             border: none;
             border-radius: 50%;
@@ -154,7 +221,7 @@
 
         .send-button:hover:not(:disabled) {
             transform: scale(1.05);
-            box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
         }
 
         .send-button:disabled {
@@ -169,19 +236,21 @@
             border-left: 4px solid #c62828;
             padding: 15px;
             border-radius: 5px;
-            margin: 10px 20px;
+            margin: 10px 0;
+            align-self: stretch;
         }
 
         .notification {
             position: fixed;
             top: 20px;
             right: 20px;
-            background: #4caf50;
+            background: #667eea;
             color: white;
-            padding: 10px 20px;
+            padding: 12px 20px;
             border-radius: 10px;
             z-index: 1000;
             animation: slideInRight 0.3s ease-out;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
         }
 
         .notification.error {
@@ -190,6 +259,35 @@
 
         .notification.info {
             background: #2196f3;
+        }
+
+        .notification.success {
+            background: #4caf50;
+        }
+
+        .history-loader {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+            font-style: italic;
+        }
+
+        .welcome-message {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            margin: 10px;
+            text-align: center;
+        }
+
+        .welcome-message h3 {
+            margin-bottom: 10px;
+        }
+
+        .welcome-message p {
+            opacity: 0.9;
+            line-height: 1.5;
         }
 
         @keyframes slideIn {
@@ -227,6 +325,7 @@
             .chat-container {
                 height: 100vh;
                 border-radius: 0;
+                max-width: 100%;
             }
             
             .chat-header {
@@ -240,6 +339,12 @@
             
             .message {
                 max-width: 90%;
+            }
+
+            .session-info, .clear-button {
+                position: static;
+                transform: none;
+                margin-top: 10px;
             }
         }
 
@@ -266,23 +371,33 @@
 <body>
     <div class="chat-container">
         <div class="chat-header">
-            <h1>📚 AI Tạo Bài Tập</h1>
-            <p>Tạo bài tập học tập với AI thông minh</p>
+            <button class="clear-button" onclick="clearChatHistory()" title="Xóa lịch sử chat">
+                🗑️ Xóa lịch sử
+            </button>
+            <h1>🤖 AI Chat Assistant</h1>
+            <p>Trợ lý AI thông minh với DeepSeek</p>
+            <div class="session-info" id="sessionInfo">
+                Đang tải...
+            </div>
         </div>
         
         <div class="chat-messages" id="chatMessages">
-            <!-- literature history will be loaded here -->
+            <div class="history-loader">📱 Đang tải lịch sử chat...</div>
         </div>
 
         <div class="chat-input-container">
-            <textarea 
-                class="chat-input" 
-                id="messageInput" 
-                placeholder="Nhập yêu cầu tạo bài tập (ví dụ: Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết...)"
-                rows="1"
-            ></textarea>
+            <div class="input-wrapper">
+                <textarea 
+                    class="chat-input" 
+                    id="messageInput" 
+                    placeholder="Nhập tin nhắn của bạn... (Shift + Enter để xuống dòng)"
+                    rows="1"
+                    maxlength="4000"
+                ></textarea>
+                <div class="char-counter" id="charCounter">0/4000</div>
+            </div>
             <button class="send-button" id="sendButton" onclick="sendMessage()">
-                📚
+                ➤
             </button>
         </div>
     </div>
@@ -291,47 +406,142 @@
         const chatMessages = document.getElementById('chatMessages');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
+        const charCounter = document.getElementById('charCounter');
+        const sessionInfo = document.getElementById('sessionInfo');
         
-        // Backend URL - thay đổi URL này khi deploy backend
-        const BACKEND_URL = 'http://localhost:3000'; // Hoặc 'https://edus-ai-deep.vercel.app'
+        // Backend URL
+        const BACKEND_URL = 'http://localhost:3000';
 
-        let literatureHistoryLoaded = false;
+        let chatHistoryLoaded = false;
+        let sessionData = null;
 
-        // ===== literature HISTORY FUNCTIONS =====
+        // ===== CHAT HISTORY FUNCTIONS =====
 
-        // Load literature history from backend
-        async function loadliteratureHistory() {
+        // Load chat history from Firebase via backend
+        async function loadChatHistory() {
             try {
-                console.log('🔄 Loading literature history...');
+                console.log('🔄 Loading chat history from Firebase...');
                 
-                const response = await fetch(`${BACKEND_URL}/api/literature/history`);
+                const response = await fetch(`${BACKEND_URL}/api/chat/history`);
                 const data = await response.json();
                 
-                if (data.success && data.literatures.length > 0) {
-                    console.log(`✅ Loaded ${data.literatures.length} literatures from history`);
+                if (data.success && data.messages.length > 0) {
+                    console.log(`✅ Loaded ${data.messages.length} messages from Firebase`);
                     
-                    // Clear any existing messages
+                    // Clear loading message
                     chatMessages.innerHTML = '';
                     
-                    // Render literature history (seamlessly)
-                    data.literatures.forEach(literature => {
-                        addMessage(literature.prompt, 'user', null, false, true);
-                        addMessage(literature.result, 'ai', null, false, true);
+                    // Show session info
+                    sessionData = data.sessionInfo;
+                    updateSessionInfo();
+                    
+                    // Render chat history
+                    data.messages.forEach((message, index) => {
+                        addMessage(message.content, message.sender, message.timestamp, true, true);
                     });
+
+                    showNotification(`📱 Đã tải ${data.messages.length} tin nhắn từ phiên trước`, 'info');
                 } else {
-                    console.log('📭 No literature history, starting fresh');
-                    // Show welcome message for new session
-                    addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
+                    console.log('📭 No chat history found, starting fresh');
+                    // Clear loading and show welcome
+                    chatMessages.innerHTML = '';
+                    showWelcomeMessage();
+                    updateSessionInfo();
                 }
                 
-                literatureHistoryLoaded = true;
+                chatHistoryLoaded = true;
                 
             } catch (error) {
-                console.error('❌ Failed to load literature history:', error);
-                // Show welcome message on error
-                addMessage('Xin chào! Tôi là AI Tạo Bài Tập. Bạn có thể yêu cầu tôi tạo bài tập cho bất kỳ môn học nào. Hãy bắt đầu! 📚\n\nVí dụ: "Tạo 10 câu hỏi toán lớp 10 về phương trình bậc 2, có đáp án chi tiết"', 'ai');
-                literatureHistoryLoaded = true;
+                console.error('❌ Failed to load chat history:', error);
+                chatMessages.innerHTML = '';
+                showWelcomeMessage();
+                chatHistoryLoaded = true;
             }
+        }
+
+        // Save message to Firebase via backend
+        async function saveMessageToBackend(content, sender, images = []) {
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chat/save`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: content,
+                        sender: sender,
+                        images: images
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                return result.success;
+                
+            } catch (error) {
+                console.error('❌ Failed to save message:', error);
+                return false;
+            }
+        }
+
+        // Clear chat history
+        async function clearChatHistory() {
+            if (!confirm('Bạn có chắc muốn xóa tất cả lịch sử chat?')) return;
+            
+            try {
+                const response = await fetch(`${BACKEND_URL}/api/chat/clear`, {
+                    method: 'DELETE'
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    chatMessages.innerHTML = '';
+                    showWelcomeMessage();
+                    sessionData = null;
+                    updateSessionInfo();
+                    showNotification('🗑️ Đã xóa lịch sử chat', 'success');
+                } else {
+                    showNotification('❌ Không thể xóa lịch sử', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Error clearing chat:', error);
+                showNotification('❌ Có lỗi khi xóa lịch sử', 'error');
+            }
+        }
+
+        // Update session info display
+        function updateSessionInfo() {
+            if (sessionData) {
+                const timeRemaining = Math.floor(sessionData.timeRemaining / (1000 * 60 * 60));
+                sessionInfo.innerHTML = `📊 ${sessionData.messageCount} tin nhắn<br>⏰ Còn ${timeRemaining}h`;
+            } else {
+                sessionInfo.innerHTML = `🆕 Phiên mới<br>⏰ 24h`;
+            }
+        }
+
+        // Show welcome message
+        function showWelcomeMessage() {
+            const welcomeDiv = document.createElement('div');
+            welcomeDiv.className = 'welcome-message';
+            welcomeDiv.innerHTML = `
+                <h3>🤖 Chào mừng bạn đến với AI Chat!</h3>
+                <p>Tôi là trợ lý AI thông minh được hỗ trợ bởi DeepSeek. Tôi có thể giúp bạn:</p>
+                <br>
+                <p>• Trả lời câu hỏi về mọi chủ đề<br>
+                • Giải thích kiến thức phức tạp<br>
+                • Hỗ trợ học tập và làm việc<br>
+                • Tư vấn và giải quyết vấn đề</p>
+                <br>
+                <p>Hãy bắt đầu cuộc trò chuyện nhé! 💬</p>
+            `;
+            
+            chatMessages.appendChild(welcomeDiv);
+            chatMessages.scrollTop = chatMessages.scrollHeight;
         }
 
         // Show notification
@@ -344,11 +554,23 @@
             
             setTimeout(() => {
                 notification.remove();
-            }, 3000);
+            }, 4000);
         }
 
-        // Auto-resize textarea
+        // Character counter
         messageInput.addEventListener('input', function() {
+            const length = this.value.length;
+            charCounter.textContent = `${length}/4000`;
+            
+            if (length > 3500) {
+                charCounter.className = 'char-counter danger';
+            } else if (length > 3000) {
+                charCounter.className = 'char-counter warning';
+            } else {
+                charCounter.className = 'char-counter';
+            }
+            
+            // Auto-resize textarea
             this.style.height = 'auto';
             this.style.height = Math.min(this.scrollHeight, 120) + 'px';
         });
@@ -365,9 +587,15 @@
             const message = messageInput.value.trim();
             if (!message || sendButton.disabled) return;
 
-            // Wait for literature history to load first
-            if (!literatureHistoryLoaded) {
-                showNotification('⏳ Đang tải lịch sử bài tập, vui lòng đợi...', 'info');
+            // Wait for chat history to load first
+            if (!chatHistoryLoaded) {
+                showNotification('⏳ Đang tải lịch sử chat, vui lòng đợi...', 'info');
+                return;
+            }
+
+            // Check message length
+            if (message.length > 4000) {
+                showNotification('⚠️ Tin nhắn quá dài (tối đa 4000 ký tự)', 'error');
                 return;
             }
 
@@ -375,26 +603,25 @@
             addMessage(message, 'user');
             messageInput.value = '';
             messageInput.style.height = 'auto';
+            charCounter.textContent = '0/4000';
+            charCounter.className = 'char-counter';
 
             // Disable send button and show loading
             sendButton.disabled = true;
             const loadingElement = showLoading();
 
             try {
-                const response = await fetch(`${BACKEND_URL}/api/literature`, {
+                // Save user message to Firebase
+                await saveMessageToBackend(message, 'user');
+
+                // Send to DeepSeek API via backend
+                const response = await fetch(`${BACKEND_URL}/api/chat`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
                     },
                     body: JSON.stringify({ 
-                        message: message,
-                        formData: {
-                            subject: 'Mixed',
-                            grade: 'Mixed',
-                            difficulty: 'Mixed',
-                            topic: 'User Request',
-                            quantity: 'Variable'
-                        }
+                        message: message
                     })
                 });
 
@@ -408,12 +635,29 @@
                 loadingElement.remove();
                 addMessage(data.response, 'ai');
 
-                showNotification('✅ Đã tạo bài tập thành công!', 'success');
+                // Save AI response to Firebase
+                await saveMessageToBackend(data.response, 'ai');
+
+                // Update session info
+                if (sessionData) {
+                    sessionData.messageCount += 2; // user + ai
+                    updateSessionInfo();
+                }
+
+                showNotification('✅ Tin nhắn đã được gửi', 'success');
 
             } catch (error) {
                 console.error('Error:', error);
                 loadingElement.remove();
-                showError('Có lỗi xảy ra khi tạo bài tập. Vui lòng thử lại.');
+                showError('Có lỗi xảy ra khi gửi tin nhắn. Vui lòng thử lại.');
+                
+                if (error.message.includes('503')) {
+                    showNotification('⚠️ Đã hết hạn mức sử dụng API', 'error');
+                } else if (error.message.includes('429')) {
+                    showNotification('⚠️ Quá nhiều yêu cầu, vui lòng chờ', 'error');
+                } else {
+                    showNotification('❌ Lỗi kết nối, vui lòng thử lại', 'error');
+                }
             } finally {
                 sendButton.disabled = false;
                 messageInput.focus();
@@ -429,18 +673,36 @@
             contentDiv.textContent = content;
             messageDiv.appendChild(contentDiv);
             
+            // Add timestamp
+            if (timestamp || !isFromHistory) {
+                const timestampDiv = document.createElement('div');
+                timestampDiv.className = 'message-timestamp';
+                
+                if (timestamp) {
+                    timestampDiv.textContent = new Date(timestamp).toLocaleTimeString('vi-VN');
+                } else {
+                    timestampDiv.textContent = new Date().toLocaleTimeString('vi-VN');
+                }
+                
+                messageDiv.appendChild(timestampDiv);
+            }
+            
             chatMessages.appendChild(messageDiv);
-            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Auto scroll to bottom for new messages (not restored)
+            if (!isFromHistory) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
 
-            // Note: literature messages are automatically saved by backend in /api/literature endpoint
-            // No need to manually save like chat messages
+            // Don't save messages that are being restored from history
+            // New messages are saved by the sendMessage function
         }
 
         function showLoading() {
             const loadingDiv = document.createElement('div');
             loadingDiv.className = 'message loading';
             loadingDiv.innerHTML = `
-                <span>🤖 AI đang tạo bài tập...</span>
+                <span>🤖 AI đang suy nghĩ...</span>
                 <div class="loading-dots">
                     <div class="loading-dot"></div>
                     <div class="loading-dot"></div>
@@ -467,18 +729,27 @@
             }, 5000);
         }
 
-        // Initialize with literature history
+        // Initialize chat with history
         window.addEventListener('load', async () => {
-            console.log('🚀 literature page loaded, loading history...');
+            console.log('🚀 Chat page loaded, loading history...');
             
-            // Load literature history first
-            await loadliteratureHistory();
+            // Load chat history from Firebase
+            await loadChatHistory();
             
-            // Then focus input
+            // Focus input
             messageInput.focus();
             
-            console.log('✅ literature history loaded');
+            console.log('✅ Chat history loaded and ready');
         });
+
+        // Auto-scroll to bottom when new messages arrive
+        const observer = new MutationObserver(() => {
+            if (chatHistoryLoaded) {
+                chatMessages.scrollTop = chatMessages.scrollHeight;
+            }
+        });
+        
+        observer.observe(chatMessages, { childList: true });
     </script>
 </body>
 </html>
