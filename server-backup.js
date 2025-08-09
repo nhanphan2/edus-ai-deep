@@ -137,7 +137,7 @@ app.get('/', (req, res) => {
         message: 'EduS Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
         version: '3.0.0',
-        ai_provider: 'DeepSeek AI',
+        ai_provider: 'EduS AI',
         storage: 'Firebase Firestore',
         chat_history: 'Firebase (24h persistent)',
         exercise_history: 'Firebase (24h persistent)',
