@@ -134,7 +134,7 @@ async function callDeepSeek(message) {
 
 app.get('/', (req, res) => {
     res.json({ 
-        message: 'DeepSeek Chat Backend đang hoạt động!',
+        message: 'EduS Chat Backend đang hoạt động!',
         timestamp: new Date().toISOString(),
         version: '3.0.0',
         ai_provider: 'DeepSeek AI',
