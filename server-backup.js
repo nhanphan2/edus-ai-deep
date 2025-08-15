@@ -151,6 +151,119 @@ app.get('/', (req, res) => {
         }
     });
 });
+// THÊM ENDPOINT STREAMING MỚI (đặt trước /api/chat)
+app.post('/api/chat/stream', async (req, res) => {
+    try {
+        const { message, images } = req.body;
+
+        console.log('🚀 Streaming chat request:', message?.substring(0, 50) + '...');
+
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'Tin nhắn không hợp lệ' });
+        }
+
+        if (!process.env.DEEPSEEK_API_KEY) {
+            return res.status(500).json({ error: 'Server chưa được cấu hình DeepSeek API key' });
+        }
+
+        // Set headers cho streaming
+        res.writeHead(200, {
+            'Content-Type': 'text/plain; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Headers': 'Content-Type',
+        });
+
+        let fullMessage = message.trim();
+        if (images && images.length > 0) {
+            fullMessage += `\n\n[Người dùng đã gửi ${images.length} hình ảnh đính kèm]`;
+        }
+
+        // Call DeepSeek với stream: true
+        const response = await fetch('https://api.deepseek.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'deepseek-chat',
+                messages: [
+                    {
+                        role: 'system',
+                        content: 'Bạn là một AI assistant hữu ích, thông minh và thân thiện. Hãy trả lời bằng tiếng Việt một cách tự nhiên và chi tiết.'
+                    },
+                    {
+                        role: 'user',
+                        content: fullMessage
+                    }
+                ],
+                max_tokens: 2000,
+                temperature: 0.7,
+                stream: true // ⭐ Quan trọng: Enable streaming
+            })
+        });
+
+        if (!response.ok) {
+            res.write('❌ Lỗi kết nối API DeepSeek');
+            res.end();
+            return;
+        }
+
+        // Đọc streaming response
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                
+                if (done) {
+                    res.write('[DONE]');
+                    res.end();
+                    break;
+                }
+
+                const chunk = decoder.decode(value);
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.slice(6);
+                        
+                        if (data === '[DONE]') {
+                            res.write('[DONE]');
+                            res.end();
+                            return;
+                        }
+                        
+                        try {
+                            const parsed = JSON.parse(data);
+                            const content = parsed.choices?.[0]?.delta?.content;
+                            
+                            if (content) {
+                                // Gửi từng chunk về frontend
+                                res.write(content);
+                            }
+                        } catch (e) {
+                            // Ignore parsing errors
+                        }
+                    }
+                }
+            }
+        } catch (streamError) {
+            console.error('Streaming error:', streamError);
+            res.write('❌ Lỗi trong quá trình streaming');
+            res.end();
+        }
+
+    } catch (error) {
+        console.error('Error in streaming chat:', error);
+        res.write('❌ Có lỗi xảy ra khi kết nối với AI');
+        res.end();
+    }
+});
 
 // ===== CHAT ENDPOINTS =====
 
