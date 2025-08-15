@@ -366,6 +366,52 @@
         .chat-messages::-webkit-scrollbar-thumb:hover {
             background: #a8a8a8;
         }
+        /* Typewriter effect cursor */
+.typing-cursor {
+    animation: blink 1s infinite;
+    color: #667eea;
+    font-weight: bold;
+    margin-left: 2px;
+}
+
+@keyframes blink {
+    0%, 50% { opacity: 1; }
+    51%, 100% { opacity: 0; }
+}
+
+/* AI message improvements for streaming */
+.ai-message {
+    align-self: flex-start;
+    background: #f1f3f4;
+    color: #333;
+    border-bottom-left-radius: 5px;
+    border-left: 4px solid #667eea;
+    white-space: pre-wrap;
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    line-height: 1.6;
+}
+
+/* Response tag */
+.response-tag {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    margin-bottom: 6px;
+    opacity: 0.8;
+}
+
+.response-tag.ai {
+    background: linear-gradient(45deg, #667eea, #764ba2);
+    color: white;
+}
+
+.response-tag.edus {
+    background: #e8f5e8;
+    color: #2e7d32;
+    border: 1px solid #c8e6c9;
+}
     </style>
 </head>
 <body>
@@ -584,119 +630,110 @@
         });
 
         async function sendMessage() {
-            const message = messageInput.value.trim();
-            if (!message || sendButton.disabled) return;
+    const message = messageInput.value.trim();
+    if (!message || sendButton.disabled) return;
 
-            // Wait for chat history to load first
-            if (!chatHistoryLoaded) {
-                showNotification('⏳ Đang tải lịch sử chat, vui lòng đợi...', 'info');
-                return;
-            }
+    // Wait for chat history to load first
+    if (!chatHistoryLoaded) {
+        showNotification('⏳ Đang tải lịch sử chat, vui lòng đợi...', 'info');
+        return;
+    }
 
-            // Check message length
-            if (message.length > 4000) {
-                showNotification('⚠️ Tin nhắn quá dài (tối đa 4000 ký tự)', 'error');
-                return;
-            }
+    // Check message length
+    if (message.length > 4000) {
+        showNotification('⚠️ Tin nhắn quá dài (tối đa 4000 ký tự)', 'error');
+        return;
+    }
 
-            // Add user message to chat
-            addMessage(message, 'user');
-            messageInput.value = '';
-            messageInput.style.height = 'auto';
-            charCounter.textContent = '0/4000';
-            charCounter.className = 'char-counter';
+    // Add user message to chat
+    addMessage(message, 'user');
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    charCounter.textContent = '0/4000';
+    charCounter.className = 'char-counter';
 
-            // Disable send button and show loading
-            sendButton.disabled = true;
-            const loadingElement = showLoading();
+    // Disable send button
+    sendButton.disabled = true;
+    
+    // Save user message to Firebase
+    await saveMessageToBackend(message, 'user');
 
-            try {
-                // Save user message to Firebase
-                await saveMessageToBackend(message, 'user');
+    // Create AI message container for streaming
+    const aiMessageDiv = createAIMessageContainer();
 
-                // Send to DeepSeek API via backend
-                const response = await fetch(`${BACKEND_URL}/api/chat`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ 
-                        message: message
-                    })
-                });
-
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
-                }
-
-                const data = await response.json();
-                
-                // Remove loading and add AI response
-                loadingElement.remove();
-                addMessage(data.response, 'ai');
-
-                // Save AI response to Firebase
-                await saveMessageToBackend(data.response, 'ai');
-
-                // Update session info
-                if (sessionData) {
-                    sessionData.messageCount += 2; // user + ai
-                    updateSessionInfo();
-                }
-
-                showNotification('✅ Tin nhắn đã được gửi', 'success');
-
-            } catch (error) {
-                console.error('Error:', error);
-                loadingElement.remove();
-                showError('Có lỗi xảy ra khi gửi tin nhắn. Vui lòng thử lại.');
-                
-                if (error.message.includes('503')) {
-                    showNotification('⚠️ Đã hết hạn mức sử dụng API', 'error');
-                } else if (error.message.includes('429')) {
-                    showNotification('⚠️ Quá nhiều yêu cầu, vui lòng chờ', 'error');
-                } else {
-                    showNotification('❌ Lỗi kết nối, vui lòng thử lại', 'error');
-                }
-            } finally {
-                sendButton.disabled = false;
-                messageInput.focus();
-            }
+    try {
+        // Try streaming first
+        const streamingWorked = await tryStreamingResponse(message, aiMessageDiv);
+        
+        if (!streamingWorked) {
+            // Fallback to regular API
+            console.log('🔄 Streaming failed, using regular API...');
+            await useRegularAPI(message, aiMessageDiv);
         }
+
+        // Update session info
+        if (sessionData) {
+            sessionData.messageCount += 2; // user + ai
+            updateSessionInfo();
+        }
+
+    } catch (error) {
+        console.error('Error:', error);
+        aiMessageDiv.remove();
+        showError('Có lỗi xảy ra khi gửi tin nhắn. Vui lòng thử lại.');
+        
+        if (error.message.includes('503')) {
+            showNotification('⚠️ Đã hết hạn mức sử dụng API', 'error');
+        } else if (error.message.includes('429')) {
+            showNotification('⚠️ Quá nhiều yêu cầu, vui lòng chờ', 'error');
+        } else {
+            showNotification('❌ Lỗi kết nối, vui lòng thử lại', 'error');
+        }
+    } finally {
+        sendButton.disabled = false;
+        messageInput.focus();
+    }
+}
 
         function addMessage(content, sender, timestamp = null, isRestored = false, isFromHistory = false) {
-            const messageDiv = document.createElement('div');
-            messageDiv.className = `message ${sender}-message`;
-            
-            // Add message content
-            const contentDiv = document.createElement('div');
-            contentDiv.textContent = content;
-            messageDiv.appendChild(contentDiv);
-            
-            // Add timestamp
-            if (timestamp || !isFromHistory) {
-                const timestampDiv = document.createElement('div');
-                timestampDiv.className = 'message-timestamp';
-                
-                if (timestamp) {
-                    timestampDiv.textContent = new Date(timestamp).toLocaleTimeString('vi-VN');
-                } else {
-                    timestampDiv.textContent = new Date().toLocaleTimeString('vi-VN');
-                }
-                
-                messageDiv.appendChild(timestampDiv);
-            }
-            
-            chatMessages.appendChild(messageDiv);
-            
-            // Auto scroll to bottom for new messages (not restored)
-            if (!isFromHistory) {
-                chatMessages.scrollTop = chatMessages.scrollHeight;
-            }
-
-            // Don't save messages that are being restored from history
-            // New messages are saved by the sendMessage function
+    const messageDiv = document.createElement('div');
+    messageDiv.className = `message ${sender}-message`;
+    
+    // Add response tag for AI messages
+    if (sender === 'ai') {
+        const tagDiv = document.createElement('div');
+        tagDiv.className = 'response-tag ai';
+        tagDiv.textContent = 'AI';
+        messageDiv.appendChild(tagDiv);
+    }
+    
+    // Add message content
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = content;
+    messageDiv.appendChild(contentDiv);
+    
+    // Add timestamp
+    if (timestamp || !isFromHistory) {
+        const timestampDiv = document.createElement('div');
+        timestampDiv.className = 'message-timestamp';
+        
+        if (timestamp) {
+            timestampDiv.textContent = new Date(timestamp).toLocaleTimeString('vi-VN');
+        } else {
+            timestampDiv.textContent = new Date().toLocaleTimeString('vi-VN');
         }
+        
+        messageDiv.appendChild(timestampDiv);
+    }
+    
+    chatMessages.appendChild(messageDiv);
+    
+    // Auto scroll to bottom for new messages (not restored)
+    if (!isFromHistory) {
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+}
 
         function showLoading() {
             const loadingDiv = document.createElement('div');
@@ -750,6 +787,199 @@
         });
         
         observer.observe(chatMessages, { childList: true });
+        // Create AI message container for streaming
+function createAIMessageContainer() {
+    const messageDiv = document.createElement('div');
+    messageDiv.className = 'message ai-message';
+    
+    // Add response tag
+    const tagDiv = document.createElement('div');
+    tagDiv.className = 'response-tag ai';
+    tagDiv.textContent = 'AI';
+    messageDiv.appendChild(tagDiv);
+    
+    // Add content container
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    messageDiv.appendChild(contentDiv);
+    
+    // Add timestamp
+    const timestampDiv = document.createElement('div');
+    timestampDiv.className = 'message-timestamp';
+    timestampDiv.textContent = new Date().toLocaleTimeString('vi-VN');
+    messageDiv.appendChild(timestampDiv);
+    
+    chatMessages.appendChild(messageDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    
+    return messageDiv;
+}
+
+// Try streaming response
+async function tryStreamingResponse(message, messageContainer) {
+    try {
+        console.log('🚀 Trying streaming API...');
+        
+        const response = await fetch(`${BACKEND_URL}/api/chat/stream`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                message: message
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Streaming API error: ${response.status}`);
+        }
+
+        await handleStreamingResponse(response, messageContainer);
+        return true;
+        
+    } catch (error) {
+        console.error('❌ Streaming failed:', error);
+        return false;
+    }
+}
+
+// Handle streaming response
+async function handleStreamingResponse(response, messageContainer) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    const contentDiv = messageContainer.querySelector('.message-content');
+    
+    let fullContent = '';
+    
+    try {
+        console.log('📡 Starting to read streaming response...');
+        
+        while (true) {
+            const { done, value } = await reader.read();
+            
+            if (done) {
+                console.log('✅ Streaming completed');
+                break;
+            }
+            
+            const chunk = decoder.decode(value);
+            
+            // Stop if we receive [DONE] signal
+            if (chunk === '[DONE]' || chunk.includes('[DONE]')) {
+                console.log('📋 Received DONE signal');
+                break;
+            }
+            
+            // Skip empty chunks
+            if (!chunk.trim()) continue;
+            
+            // Add chunk to full content
+            fullContent += chunk;
+            
+            // Display with typing cursor
+            contentDiv.textContent = fullContent;
+            const cursor = document.createElement('span');
+            cursor.className = 'typing-cursor';
+            cursor.textContent = '|';
+            contentDiv.appendChild(cursor);
+            
+            // Auto scroll
+            chatMessages.scrollTop = chatMessages.scrollHeight;
+            
+            // Small delay for smooth effect
+            await new Promise(resolve => setTimeout(resolve, 20));
+        }
+        
+        // Remove cursor and finalize
+        contentDiv.textContent = fullContent;
+        
+        // Save to Firebase
+        await saveMessageToBackend(fullContent, 'ai');
+        
+        showNotification('✅ Phản hồi streaming hoàn tất', 'success');
+        
+    } catch (error) {
+        console.error('❌ Streaming read error:', error);
+        contentDiv.textContent = 'Lỗi khi nhận phản hồi streaming từ server.';
+        throw error;
+    }
+}
+
+// Fallback to regular API
+async function useRegularAPI(message, messageContainer) {
+    const contentDiv = messageContainer.querySelector('.message-content');
+    
+    // Show loading in the message
+    contentDiv.innerHTML = `
+        <span>🤖 Đang sử dụng API thông thường...</span>
+        <div class="loading-dots">
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+            <div class="loading-dot"></div>
+        </div>
+    `;
+    
+    try {
+        const response = await fetch(`${BACKEND_URL}/api/chat`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+                message: message
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        // Simulate typewriter effect
+        await simulateTypewriter(contentDiv, data.response);
+        
+        // Save AI response to Firebase
+        await saveMessageToBackend(data.response, 'ai');
+        
+        showNotification('✅ Phản hồi API hoàn tất', 'success');
+        
+    } catch (error) {
+        console.error('❌ Regular API failed:', error);
+        contentDiv.textContent = 'Lỗi khi gọi API thông thường.';
+        throw error;
+    }
+}
+
+// Simulate typewriter effect for regular API
+async function simulateTypewriter(element, text, speed = 30) {
+    element.textContent = '';
+    
+    for (let i = 0; i <= text.length; i++) {
+        const currentText = text.substring(0, i);
+        element.textContent = currentText;
+        
+        // Add cursor
+        const cursor = document.createElement('span');
+        cursor.className = 'typing-cursor';
+        cursor.textContent = '|';
+        element.appendChild(cursor);
+        
+        // Auto scroll
+        chatMessages.scrollTop = chatMessages.scrollHeight;
+        
+        // Wait
+        await new Promise(resolve => setTimeout(resolve, speed));
+    }
+    
+    // Remove cursor when done
+    element.textContent = text;
+}
+// Debug info
+console.log('🚀 AI Chat with Streaming Support loaded');
+console.log('🔗 Backend URL:', BACKEND_URL);
+console.log('📡 Streaming endpoint:', `${BACKEND_URL}/api/chat/stream`);
+console.log('🔄 Fallback endpoint:', `${BACKEND_URL}/api/chat`);
     </script>
 </body>
 </html>
